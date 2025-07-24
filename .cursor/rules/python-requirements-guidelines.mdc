@@ -1,0 +1,28 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+When defining python requriements you should always pin your versions, and when using dependncies that may conflict with databricks apps versions you must try your best to use the version in the Databricks environment. If you have relavent context about Databricks Apps then use that. Othereise these are the dependnecies as of July 24, 2025
+
+
+## Pre-installed Python Libraries in Databricks Apps
+
+| Library                   | Version  |
+|---------------------------|----------|
+| databricks-sql-connector  | 3.4.0    |
+| databricks-sdk            | 0.33.0   |
+| mlflow-skinny             | 2.16.2   |
+| gradio                    | 4.44.0   |
+| streamlit                 | 1.38.0   |
+| shiny                     | 1.1.0    |
+| dash                      | 2.18.1   |
+| flask                     | 3.0.3    |
+| fastapi                   | 0.115.0  |
+| uvicorn[standard]         | 0.30.6   |
+| gunicorn                  | 23.0.0   |
+| dash-ag-grid              | 31.2.0   |
+| dash-mantine-components   | 0.14.4   |
+| dash-bootstrap-components | 1.6.0    |
+| plotly                    | 5.24.1   |
+| plotly-resampler          | 0.10.0   |

@@ -1,0 +1,7 @@
+command:
+  - "streamlit"
+  - "run"
+  - "app.py"
+env:
+  - name: "DATABRICKS_WAREHOUSE_ID"
+    value: "00000000-0000-0000-0000-000000000000"

@@ -1,0 +1,23 @@
+# This is a Databricks asset bundle definition for adtech_databricks_lakebase_app.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+bundle:
+  name: adtech_app_lakebase_vibe_session
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    # The default target uses 'mode: development' to create a development copy.
+    # - Deployed resources get prefixed with '[dev my_user_name]'
+    # - Any job schedules and triggers are paused by default.
+    # See also https://docs.databricks.com/dev-tools/bundles/deployment-modes.html.
+    mode: development
+    default: true
+    workspace:
+      host: https://e2-demo-field-eng.cloud.databricks.com
+       # We explicitly specify /Workspace/Users/${workspace.current_user} to make sure we only have a single copy.
+      root_path: /Workspace/Users/${workspace.current_user}/.bundle/${bundle.name}/${bundle.target}
+    permissions:
+      - user_name: ${workspace.current_user}
+        level: CAN_MANAGE
