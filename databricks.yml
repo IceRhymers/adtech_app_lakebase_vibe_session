@@ -21,3 +21,5 @@ targets:
     permissions:
       - user_name: ${workspace.current_user.userName}
         level: CAN_MANAGE
+      - group_name: "users"
+        level: CAN_VIEW

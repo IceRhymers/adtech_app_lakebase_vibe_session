@@ -10,6 +10,11 @@ When it comes to performing particular actions in this repo, there is a `Justfil
 ## Environment Setup
 - `just venv` - Create virtual environment and install dependencies
 
+## Terraform Commands
+- `just terraform-init` - Initialise terraform
+- `just terraform-plan` - Plan terraform changes
+- `just terraform-apply` - Apply terraform changes
+
 ## Database Management
 - `just migrations-generate "message"` - Generate new migration
 - `just migrations-upgrade` - Apply pending migrations

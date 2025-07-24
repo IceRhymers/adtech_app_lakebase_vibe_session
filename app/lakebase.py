@@ -1,5 +1,6 @@
 from databricks.sdk import WorkspaceClient
 import uuid
+import os
 from typing import Optional
 from sqlalchemy import create_engine
 
@@ -26,11 +27,15 @@ def get_postgres_connection(
         request_id=str(uuid.uuid4())
     )
 
+    # Use POSTGRES_GROUP env var as username if set, otherwise use current user
+    postgres_group = os.getenv('POSTGRES_GROUP')
+    username = postgres_group if postgres_group else client.current_user.me().user_name
+
     database_info = {
         "host": database.read_write_dns,
         "port": "5432",
         "database": database_name,
-        "username": client.current_user.me().user_name,
+        "username": username,
         "password": credentials.token,
         "ssl_mode": "require"
     }
@@ -66,11 +71,15 @@ def get_jdbc_url(
         request_id=str(uuid.uuid4())
     )
 
+    # Use POSTGRES_GROUP env var as username if set, otherwise use current user
+    postgres_group = os.getenv('POSTGRES_GROUP')
+    username = postgres_group if postgres_group else client.current_user.me().user_name
+
     database_info = {
         "host": database.read_write_dns,
         "port": "5432",
         "database": database_name,
-        "username": client.current_user.me().user_name,
+        "username": username,
         "password": credentials.token,
         "ssl_mode": "require"
     }

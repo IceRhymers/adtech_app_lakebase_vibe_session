@@ -5,3 +5,5 @@ command:
 env:
   - name: "LAKEBASE_DB_NAME"
     value: "vibe-session-db"
+  - name: "POSTGRES_GROUP"
+    value: "Vibe Session DB Access Role"

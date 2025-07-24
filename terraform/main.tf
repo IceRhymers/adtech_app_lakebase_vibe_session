@@ -33,11 +33,19 @@ resource "databricks_group" "postgres_role" {
 resource "databricks_permissions" "app_usage" {
   database_instance_name = databricks_database_instance.vibe_session_db.name
 
-  # Hackerman shit to make terraform work
   access_control {
     group_name       = databricks_group.postgres_role.display_name
     permission_level = "CAN_MANAGE"
   }
 
   depends_on = [databricks_group.postgres_role, databricks_database_instance.vibe_session_db]
+}
+output "postgres_role_group_id" {
+  value       = databricks_group.postgres_role.id
+  description = "The ID of the Databricks group used for Postgres DB access."
+}
+
+output "postgres_role_group_name" {
+  value       = databricks_group.postgres_role.display_name
+  description = "The display name of the Databricks group used for Postgres DB access."
 }
