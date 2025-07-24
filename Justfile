@@ -27,6 +27,10 @@ terraform-apply:
 terraform-destroy:
     cd terraform && terraform destroy
 
+# Create the with terraform
+create-database: terraform-init terraform-plan terraform-apply
+    echo "Database created"
+
 # Generate a new migration file
 migrations-generate MESSAGE:
     cd app && .venv/bin/alembic revision --autogenerate -m "{{MESSAGE}}"
@@ -85,7 +89,7 @@ app-deploy:
     databricks apps deploy "$APP_NAME" --source-code-path "$WORKSPACE_PATH/app"
 
 # Full end to end deployment.
-full-deploy: bundle-deploy app-permissions app-start app-deploy
+full-deploy: create-database bundle-deploy migrations-upgrade app-permissions app-start app-deploy
     echo "Full deploy complete"
 
 clean:
