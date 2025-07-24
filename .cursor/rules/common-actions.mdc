@@ -1,0 +1,29 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Common Actions
+
+When it comes to performing particular actions in this repo, there is a `Justfile` defined that can do everything we need. You should craft actions if you can from the justfile we have. Here are some examples of tasks you can do with the file.
+
+## Environment Setup
+- `just venv` - Create virtual environment and install dependencies
+
+## Database Management
+- `just migrations-generate "message"` - Generate new migration
+- `just migrations-upgrade` - Apply pending migrations
+- `just jdbc-url` - Get JDBC connection string
+
+## Development Workflow
+- `just run` - Run application locally for development
+
+## Deployment
+- `just bundle-deploy` - Deploy source code only
+- `just app-start` - Start app compute (if not running)
+- `just app-stop` - Stop app compute
+- `just app-deploy` - Deploy app to running compute
+- `just full-deploy` - Perform a full deployment of the app.
+
+## Cleanup
+- `just clean` - Remove virtual environment

@@ -3,5 +3,5 @@ command:
   - "run"
   - "app.py"
 env:
-  - name: "DATABRICKS_WAREHOUSE_ID"
-    value: "00000000-0000-0000-0000-000000000000"
+  - name: "LAKEBASE_DB_NAME"
+    value: "vibe-session-db"
