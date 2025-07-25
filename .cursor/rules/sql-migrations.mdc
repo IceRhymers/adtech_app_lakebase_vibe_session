@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+You should NEVER write a SQL migration for this project in agent mode. We have to use alembic to generate a revision properly.

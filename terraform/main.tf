@@ -16,9 +16,26 @@ variable "manage_principals" {
   default = []
 }
 
+variable "database_instance_name" {
+  type        = string
+  description = "Name of the Databricks database instance"
+  default     = "vibe-session-db"
+}
+
+variable "database_group_name" {
+  type        = string
+  description = "Display name for the Databricks group with database access"
+  default     = "Vibe Session DB Access Role"
+}
+
 resource "databricks_database_instance" "vibe_session_db" {
-  name     = "vibe-session-db"
+  name     = var.database_instance_name
   capacity = "CU_1"
+}
+
+output "database_instance_name" {
+  value       = databricks_database_instance.vibe_session_db.name
+  description = "The name of the Databricks database instance."
 }
 
 output "postgres_connection_string" {
@@ -27,7 +44,14 @@ output "postgres_connection_string" {
 }
 
 resource "databricks_group" "postgres_role" {
-  display_name = "Vibe Session DB Access Role"
+  display_name = var.database_group_name
+}
+
+data "databricks_current_user" "me" {}
+
+resource "databricks_group_member" "current_user_postgres_role" {
+  group_id  = databricks_group.postgres_role.id
+  member_id = data.databricks_current_user.me.id
 }
 
 resource "databricks_permissions" "app_usage" {
@@ -40,6 +64,7 @@ resource "databricks_permissions" "app_usage" {
 
   depends_on = [databricks_group.postgres_role, databricks_database_instance.vibe_session_db]
 }
+
 output "postgres_role_group_id" {
   value       = databricks_group.postgres_role.id
   description = "The ID of the Databricks group used for Postgres DB access."

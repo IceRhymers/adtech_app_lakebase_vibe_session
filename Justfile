@@ -1,3 +1,4 @@
+# Create a virtual environment for the app
 venv:
     # Check if 'uv' is installed
     if ! command -v uv >/dev/null 2>&1; then \
@@ -11,32 +12,62 @@ venv:
     # Install requirements
     uv pip install -r app/requirements.txt --python app/.venv/bin/python
 
-# Initialize Terraform working directory
+# Initialize terraform for lakebase deployment
 terraform-init:
     cd terraform && terraform init
 
-# Create and preview infrastructure changes
-terraform-plan:
-    cd terraform && terraform plan -out plan.tfplan
+# Create terraform.tfvars file to override default values
+terraform-init-vars:
+    cd terraform && if [ ! -f terraform.tfvars ]; then \
+        echo "database_instance_name = \"vibe-session-db\"" > terraform.tfvars; \
+        echo "database_group_name = \"Vibe Session DB Access Role\"" >> terraform.tfvars; \
+        echo "Created terraform.tfvars file"; \
+    else \
+        echo "terraform.tfvars already exists, skipping creation"; \
+    fi
 
-# Apply infrastructure changes
-terraform-apply:    
+# Plann terraform changes for lakebase deployment
+terraform-plan:
+    cd terraform && terraform plan -out plan.tfplan -var-file=terraform.tfvars
+
+# Apply terraform changes for lakebase deployment
+terraform-apply:
     cd terraform && terraform apply plan.tfplan
 
-# Destroy all managed infrastructure
+# Full terraform deployment for lakebase deployment.
+terraform-full: terraform-init-vars terraform-init terraform-plan terraform-apply
+    echo "Terraform deployment complete"
+
+# Destroy terraform managed infrastructure
 terraform-destroy:
     cd terraform && terraform destroy
 
-# Create the with terraform
-create-database: terraform-init terraform-plan terraform-apply
-    echo "Database created"
+# Wait for database instance to be available
+wait-for-database:
+    DATABASE_NAME=$(cd terraform && terraform output -raw database_instance_name) && \
+    echo "Checking database instance: $DATABASE_NAME" && \
+    while true; do \
+        STATE=$(databricks database get-database-instance "$DATABASE_NAME" | jq -r '.state') && \
+        echo "Database state: $STATE" && \
+        if [ "$STATE" = "AVAILABLE" ]; then \
+            echo "Database is available!" && \
+            break; \
+        elif [ "$STATE" = "STARTING" ]; then \
+            echo "Database is starting, waiting 30 seconds..." && \
+            sleep 30; \
+        else \
+            echo "ERROR: Database is in unexpected state: $STATE" && \
+            echo "Manual intervention may be required. Expected states: STARTING, AVAILABLE" && \
+            exit 1; \
+        fi; \
+    done
 
 # Generate a new migration file
-migrations-generate MESSAGE:
+migrations-generate MESSAGE: wait-for-database
     cd app && .venv/bin/alembic revision --autogenerate -m "{{MESSAGE}}"
 
 # Upgrade the database to the latest version
-migrations-upgrade:
+migrations-upgrade: wait-for-database
     cd app && .venv/bin/alembic upgrade head
 
 # Generate a JDBC URL for use in a SQL Workbench, using the same configuration as Alembic.
@@ -89,9 +120,10 @@ app-deploy:
     databricks apps deploy "$APP_NAME" --source-code-path "$WORKSPACE_PATH/app"
 
 # Full end to end deployment.
-full-deploy: create-database bundle-deploy migrations-upgrade app-permissions app-start app-deploy
+full-deploy: terraform-full bundle-deploy migrations-upgrade app-permissions app-start app-deploy
     echo "Full deploy complete"
 
+# Clean up the virtual environment
 clean:
     # Remove the .venv directory if it exists
     if [ -d "app/.venv" ]; then \
@@ -99,4 +131,7 @@ clean:
         echo 'Removed app/.venv'; \
     else \
         echo 'No virtual environment found at app/.venv'; \
-    fi 
+    fi
+    # Remove all __pycache__ directories
+    find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+    echo 'Removed all __pycache__ directories' 

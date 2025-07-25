@@ -4,45 +4,137 @@ This project provides a simple Streamlit application for managing key-value pair
 
 ---
 
-## Quick Start
 
-### 1. Deploy Infrastructure (Postgres via Databricks Lakebase)
+### Required Tools
 
-All infrastructure is managed with Terraform. This will provision a PostgreSQL instance in Databricks Lakebase and set up access roles.
+- **[Databricks CLI](https://docs.databricks.com/en/dev-tools/cli/index.html)** - Command-line interface for Databricks workspace management and app deployment
+- **[Terraform](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli)** - Infrastructure as Code tool for provisioning Databricks Lakebase resources
+- **[jq](https://stedolan.github.io/jq/download/)** - Lightweight command-line JSON processor used in deployment scripts
+- **[just](https://github.com/casey/just#installation)** - Command runner for executing project tasks and workflows
+
+### Installation Options
+
+#### macOS (Recommended)
+If you are on macOS, you can install all tools using [Homebrew](https://brew.sh/):
 
 ```bash
+# Install Homebrew if you haven't already
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install all required tools
+brew install databricks/tap/databricks
+brew install terraform
+brew install jq
+brew install just
+```
+
+#### Manual Installation
+- **Databricks CLI**: Follow the [official installation guide](https://docs.databricks.com/en/dev-tools/cli/install.html)
+- **Terraform**: Download from [terraform.io](https://developer.hashicorp.com/terraform/downloads)
+- **jq**: Available on most package managers or download from [jqlang.github.io/jq](https://jqlang.github.io/jq/download/)
+- **just**: Install via [cargo](https://crates.io/crates/just) or download from [GitHub releases](https://github.com/casey/just/releases)
+
+### Verification
+After installation, verify all tools are working:
+
+```bash
+databricks --version
+terraform --version
+jq --version
+just --version
+```
+
+## Quick Start
+
+### 0. Full send deployment, no edit.
+
+If you want to just get straight into the vibe, this project can build and deploy end to end with `just full-deploy` using your default Databricks CLI profile. But more careful instructions are below.
+
+### 1. Clone repo and edit bundle.
+
+```bash
+git clone <<this repo whenever I make it>
+```
+
+Then you need to edit the `databricks.yml` to point to your workspace
+
+```yaml
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://YOUR_WORKSPACE_HERE.cloud.databricks.com
+```
+
+### 2. Deploy Infrastructure (Postgres via Databricks Lakebase)
+
+All infrastructure is managed with Terraform. This will provision a PostgreSQL instance in Databricks Lakebase and set up a group that will be used for access roles. This will use your default CLI profile and can be changed in `main.tf` if required. You can easily run the terraform with 
+
+```bash
+# Optionally generate terraform inputs for instance and group name overrides
+just terraform-init-vars
 # Initialize Terraform
 just terraform-init
 # Review the plan
 just terraform-plan
-# Apply the infrastructure (creates the Postgres DB and access roles)
+# Apply the infrastructure (creates the Postgres DB and workspace group)
 just terraform-apply
 ```
+
+Or just simply
+
+`just terraform-full`
 
 After applying, Terraform will output the connection string and group info. Save these for configuring the app.
 
 ---
 
-### 2. Set Up and Run the App
+### 3. Set Up the App
 
-The app is located in the `app/` directory. You can use the Justfile for common actions.
+The app is located in the `app/` directory. You can use the Justfile for common actions. 
 
 #### a. Create a Python Virtual Environment and Install Dependencies
 
 ```bash
-cd app
 just venv
 ```
 
-#### b. Set Required Environment Variables
+#### b. Configure Environment Variables
 
-Set the Lakebase database name (from Terraform output):
+The app uses `app/app.yml` to configure environment variables for Databricks Apps, and will work when using `just run` to run locally. The configuration includes:
 
-```bash
-export LAKEBASE_DB_NAME="vibe-session-db"
+```yaml
+env:
+  - name: "LAKEBASE_DB_NAME"
+    value: "vibe-session-db"
+  - name: "POSTGRES_GROUP"
+    value: "Vibe Session DB Access Role"
 ```
 
-#### c. Run the App
+| Variable Name      | Description                                                | Example Value                    | Required |
+|--------------------|------------------------------------------------------------|----------------------------------|----------|
+| `LAKEBASE_DB_NAME` | Name of the Databricks Lakebase Postgres database instance | `vibe-session-db`                | Yes      |
+| `POSTGRES_GROUP`   | Name of the Databricks group with access to the database   | `Vibe Session DB Access Role`    | No      |
+
+
+If you need to override these values for different environments, you can modify the `app.yml` file or use the `valueFrom` field to reference external sources like secrets.
+
+#### c. Configure `alemblic.ini`
+
+If you changed the name of the database instance in terraform, you'll need to configure `alembic.ini` to look for your database instance. The default values align to what terraform deploys out of the box.
+
+#### d. Run Database Migrations
+
+Before running the app, you need to apply the database migrations to set up the PostgreSQL role and permissions:
+
+```bash
+just migrations-upgrade
+```
+
+This migration creates the PostgreSQL role for the Databricks group and grants the necessary permissions (SELECT, INSERT, UPDATE, DELETE) on the database tables.
+
+#### e. Run the App
 
 ```bash
 just run
@@ -61,7 +153,7 @@ streamlit run app.py
 ---
 
 ## Dependencies
-- Python 3.8+
+- Python 3.10+
 - streamlit==1.38.0
 - sqlalchemy==2.0.30
 - alembic==1.13.1

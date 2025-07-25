@@ -5,7 +5,7 @@ alwaysApply: true
 ---
 # Common Actions
 
-When it comes to performing particular actions in this repo, there is a `Justfile` defined that can do everything we need. You should craft actions if you can from the justfile we have. Here are some examples of tasks you can do with the file.
+When it comes to performing particular actions in this repo, there is a `Justfile` defined that can do everything we need. You should craft actions if you can from the justfile we have. Here are some examples of tasks you can do with the file. You can always check the lists of tasks with `just --list` that will provide documentation of what tasks do. 
 
 ## Environment Setup
 - `just venv` - Create virtual environment and install dependencies
