@@ -165,7 +165,6 @@ streamlit run app.py
 - alembic==1.13.1
 - databricks-sdk==0.58.0
 - psycopg2-binary==2.9.9
-- debugpy==1.8.15
 
 > **Note:** Some dependencies are pre-installed in Databricks Apps. See the [workspace rules](#) for version alignment.
 
