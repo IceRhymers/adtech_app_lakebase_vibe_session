@@ -27,7 +27,7 @@ terraform-init-vars:
     fi
 
 # Plann terraform changes for lakebase deployment
-terraform-plan:
+terraform-plan: terraform-init-vars
     cd terraform && terraform plan -out plan.tfplan -var-file=terraform.tfvars
 
 # Apply terraform changes for lakebase deployment

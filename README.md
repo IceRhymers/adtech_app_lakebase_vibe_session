@@ -118,7 +118,7 @@ env:
 | `POSTGRES_GROUP`   | Name of the Databricks group with access to the database   | `Vibe Session DB Access Role`    | No      |
 
 
-If you need to override these values for different environments, you can modify the `app.yml` file or use the `valueFrom` field to reference external sources like secrets.
+If you need to override these values for different environments, you can modify the `app.yml` file or use the `valueFrom` field to reference external sources like secrets. 
 
 #### c. Configure `alemblic.ini`
 
@@ -135,6 +135,12 @@ just migrations-upgrade
 This migration creates the PostgreSQL role for the Databricks group and grants the necessary permissions (SELECT, INSERT, UPDATE, DELETE) on the database tables.
 
 #### e. Run the App
+
+You may need to configure the Databricks SDK with environment variables to run locally, since the default credential chain doesn't work. 
+
+```bash
+export DATABRICKS_CONFIG_PROFILE=DEFAULT
+```
 
 ```bash
 just run
