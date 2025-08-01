@@ -4,6 +4,8 @@ command:
   - "app.py"
 env:
   - name: "LAKEBASE_DB_NAME"
-    value: "vibe-session-db"
+    value: "tannerw-adtech-db"
   - name: "POSTGRES_GROUP"
-    value: "Vibe Session DB Access Role"
+    value: "Tanner W Adtech DB Access Role"
+  - name: "AGENT_ENDPOINT"
+    value: "databricks-claude-3-7-sonnet"

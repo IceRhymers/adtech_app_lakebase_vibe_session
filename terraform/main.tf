@@ -22,6 +22,12 @@ variable "database_instance_name" {
   default     = "vibe-session-db"
 }
 
+variable "database_catalog_name" {
+  type        = string
+  description = "Name of the Databricks database catalog"
+  default     = "vibe_session_postgres"
+}
+
 variable "database_group_name" {
   type        = string
   description = "Display name for the Databricks group with database access"
