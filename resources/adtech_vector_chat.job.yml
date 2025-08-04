@@ -33,3 +33,17 @@ resources:
               sink_schema: default
           depends_on:
             - task_key: postgres_catalog
+
+    adtech_chat_history_agent_job:
+      name: adtech_chat_history_agent_job
+
+      tasks:
+        - task_key: adtech_chat_history_agent
+          notebook_task:
+            notebook_path: ../data_pipelines/src/02-chat-history-agent.ipynb
+            base_parameters:
+              target_catalog: tanner_wendland
+              target_schema: default
+              vector_search_endpoint: one-env-shared-endpoint-7
+              vector_search_index: tanner_wendland.default.chat_history_index
+              llm_model_serving_endpoint_name: databricks-claude-3-7-sonnet

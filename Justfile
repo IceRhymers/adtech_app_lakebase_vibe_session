@@ -112,6 +112,10 @@ app-permissions: bundle-deploy
         echo "Service principal $SERVICE_PRINCIPAL_ID is already a member of group $DATABASE_GROUP_ID"; \
     fi
 
+# Deploy Agent to Databricks
+agent-deploy:
+    databricks bundle run adtech_chat_history_agent_job
+
 # Deploy the app to Databricks
 app-deploy:
     APP_NAME=$(databricks bundle summary -o json | jq -r '.resources.apps | to_entries | first | .value.name') && \

@@ -23,10 +23,12 @@ def upgrade() -> None:
     op.execute("SELECT databricks_create_role('Tanner W Adtech DB Access Role','GROUP');")
     op.execute('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "Tanner W Adtech DB Access Role";')
     op.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "Tanner W Adtech DB Access Role";')
+    op.execute('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "Tanner W Adtech DB Access Role";')
     pass
 
 
 def downgrade() -> None:
+    op.execute('REVOKE USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public FROM "Tanner W Adtech DB Access Role";')
     op.execute('REVOKE SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public FROM "Tanner W Adtech DB Access Role";')
     op.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM "Tanner W Adtech DB Access Role";')
     op.execute('DROP ROLE IF EXISTS "Vibe Session DB Access Role";')
