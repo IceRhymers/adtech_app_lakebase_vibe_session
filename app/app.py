@@ -8,7 +8,7 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from models import ChatHistory, MessageType, Base
+from models import ChatHistory, MessageType, Base, ChatSession
 from lakebase import get_engine
 from databricks_utils import get_workspace_client, get_current_user_name
 
@@ -40,21 +40,129 @@ if 'chat_messages' not in st.session_state:
 def get_user_chats():
     """Get all chat sessions for the current user"""
     with Session(engine) as session:
-        # Get the latest created_at for each chat_id
-        from sqlalchemy import func
-        subquery = session.query(
-            ChatHistory.chat_id,
-            func.max(ChatHistory.created_at).label('latest_created_at')
-        ).filter(
-            ChatHistory.user_name == current_user
-        ).group_by(ChatHistory.chat_id).subquery()
+        # Query ChatSession directly, ordered by updated_at (most recent first)
+        chat_sessions = session.query(ChatSession).filter(
+            ChatSession.user_name == current_user
+        ).order_by(desc(ChatSession.updated_at)).all()
         
-        # Get chat_ids ordered by the latest created_at
-        chats = session.query(subquery.c.chat_id).order_by(
-            desc(subquery.c.latest_created_at)
-        ).all()
+        return chat_sessions
+
+def create_new_chat_session(chat_id: str):
+    """Create a new chat session"""
+    with Session(engine) as session:
+        chat_session = ChatSession(
+            id=chat_id,
+            user_name=current_user,
+            title=None,  # Will be generated later
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        session.add(chat_session)
+        session.commit()
+        return chat_session
+
+def delete_chat_session(session_id: str):
+    """Delete a chat session and all its messages (cascade delete)"""
+    with Session(engine) as session:
+        chat_session = session.query(ChatSession).filter(
+            ChatSession.id == session_id,
+            ChatSession.user_name == current_user  # Security: only delete own chats
+        ).first()
         
-        return [chat[0] for chat in chats]
+        if chat_session:
+            session.delete(chat_session)
+            session.commit()
+            return True
+        return False
+
+def update_session_timestamp(session_id: str):
+    """Update the session's updated_at timestamp when new messages are added"""
+    with Session(engine) as session:
+        chat_session = session.query(ChatSession).filter(
+            ChatSession.id == session_id,
+            ChatSession.user_name == current_user
+        ).first()
+        
+        if chat_session:
+            chat_session.updated_at = datetime.utcnow()
+            session.commit()
+
+def generate_chat_title(session_id: str) -> str:
+    """Generate an AI-powered title for a chat session"""
+    try:
+        # Get first few messages for context
+        with Session(engine) as session:
+            messages = session.query(ChatHistory).filter(
+                ChatHistory.chat_id == session_id,
+                ChatHistory.user_name == current_user
+            ).order_by(ChatHistory.message_order).limit(4).all()  # First 2 exchanges
+            
+            if len(messages) < 2:
+                return "New Chat"  # Not enough context
+            
+            # Build context for title generation
+            context = []
+            for msg in messages:
+                role = "User" if msg.message_type == MessageType.USER else "Assistant"
+                context.append(f"{role}: {msg.message_content[:100]}...")  # Limit length
+            
+            context_text = "\n".join(context)
+            
+            # Create title generation payload
+            title_messages = [ChatMessage(
+                role=ChatMessageRole.USER,
+                content=f"Generate a concise 3-5 word title for this conversation. Just return the title, nothing else:\n\n{context_text}"
+            )]
+            
+            # Use existing AI endpoint for title generation
+            title = generate_bot_response(title_messages)
+            
+            # Clean up the response (remove quotes, extra text, etc.)
+            title = title.strip().strip('"').strip("'")
+            if len(title) > 50:  # Limit title length
+                title = title[:47] + "..."
+            
+            # Update the session with the new title
+            chat_session = session.query(ChatSession).filter(
+                ChatSession.id == session_id,
+                ChatSession.user_name == current_user
+            ).first()
+            
+            if chat_session:
+                chat_session.title = title
+                chat_session.updated_at = datetime.utcnow()
+                session.commit()
+            
+            return title
+            
+    except Exception as e:
+        # Fallback to first message or generic title
+        try:
+            with Session(engine) as session:
+                first_message = session.query(ChatHistory).filter(
+                    ChatHistory.chat_id == session_id,
+                    ChatHistory.user_name == current_user,
+                    ChatHistory.message_type == MessageType.USER
+                ).order_by(ChatHistory.message_order).first()
+                
+                if first_message:
+                    fallback_title = first_message.message_content[:30] + "..." if len(first_message.message_content) > 30 else first_message.message_content
+                    
+                    # Update session with fallback title
+                    chat_session = session.query(ChatSession).filter(
+                        ChatSession.id == session_id,
+                        ChatSession.user_name == current_user
+                    ).first()
+                    
+                    if chat_session:
+                        chat_session.title = fallback_title
+                        session.commit()
+                    
+                    return fallback_title
+        except:
+            pass
+        
+        return "New Chat"
 
 def load_chat_history(chat_id: str):
     """Load chat history for a specific chat session"""
@@ -77,6 +185,25 @@ def save_message(chat_id: str, message_type: MessageType, content: str, message_
         )
         session.add(message)
         session.commit()
+    
+    # Update the session timestamp
+    update_session_timestamp(chat_id)
+    
+    # Generate title after sufficient messages (e.g., after 2nd exchange)
+    if message_order >= 3:  # After user, assistant, user messages
+        try:
+            # Check if session already has a title
+            with Session(engine) as session:
+                chat_session = session.query(ChatSession).filter(
+                    ChatSession.id == chat_id,
+                    ChatSession.user_name == current_user
+                ).first()
+                
+                if chat_session and not chat_session.title:
+                    # Generate title in background (non-blocking)
+                    generate_chat_title(chat_id)
+        except:
+            pass  # Don't let title generation break the message saving
 
 def get_next_message_order(chat_id: str) -> int:
     """Get the next message order number for a chat"""
@@ -95,8 +222,14 @@ def generate_bot_response(messages: list[ChatMessage]) -> str:
         if not agent_endpoint:
             return "Error: AGENT_ENDPOINT environment variable not configured."
         
+        system_prompt = """
+        You are a helpful assistant that can answer questions and help with tasks, you are also able to search the chat history for relevant information. 
+        If the user asks a question that is not related to the chat history, you shouldn't mention you couldn't find anything related to the question.
+        """
+        
         # Convert ChatMessage objects to simple dictionaries
         message_dicts = []
+        messages.insert(0, ChatMessage(role=ChatMessageRole.SYSTEM, content=system_prompt))
         for msg in messages:
             message_dicts.append({
                 "role": msg.role.value,  # Convert enum to string
@@ -145,6 +278,8 @@ st.sidebar.markdown(f"**User:** {current_user}")
 # New chat button
 if st.sidebar.button("🆕 Start New Chat", type="primary"):
     new_chat_id = str(uuid.uuid4())
+    # Create the chat session first
+    create_new_chat_session(new_chat_id)
     st.session_state.current_chat_id = new_chat_id
     st.session_state.chat_history = []
     st.session_state.chat_messages = []
@@ -154,23 +289,82 @@ if st.sidebar.button("🆕 Start New Chat", type="primary"):
 user_chats = get_user_chats()
 if user_chats:
     st.sidebar.subheader("📋 Your Chats")
-    for i, chat_id in enumerate(user_chats):
-        chat_label = f"Chat {i+1}"
-        if st.sidebar.button(
-            chat_label, 
-            key=f"chat_{chat_id}",
-            type="secondary" if chat_id != st.session_state.current_chat_id else "primary"
-        ):
-            st.session_state.current_chat_id = chat_id
-            st.session_state.chat_history = load_chat_history(chat_id)
-            # Reset and rebuild ChatMessages array for the new chat
-            st.session_state.chat_messages = []
-            for message in st.session_state.chat_history:
-                role = ChatMessageRole.USER if message.message_type == MessageType.USER else ChatMessageRole.ASSISTANT
-                st.session_state.chat_messages.append(
-                    ChatMessage(role=role, content=message.message_content)
-                )
-            st.rerun()
+    for i, chat_session in enumerate(user_chats):
+        # Create a nice display label with title and timestamp
+        if chat_session.title:
+            chat_label = chat_session.title
+        else:
+            chat_label = f"Chat {i+1}"
+        
+        # Format timestamp
+        time_str = chat_session.updated_at.strftime("%m/%d %H:%M")
+        display_label = f"{chat_label}"
+        
+        # Create columns for chat button and delete button
+        col1, col2 = st.sidebar.columns([4, 1])
+        
+        with col1:
+            if st.button(
+                display_label, 
+                key=f"chat_{chat_session.id}",
+                type="secondary" if chat_session.id != st.session_state.current_chat_id else "primary",
+                help=f"Last updated: {time_str}"
+            ):
+                st.session_state.current_chat_id = chat_session.id
+                st.session_state.chat_history = load_chat_history(chat_session.id)
+                # Reset and rebuild ChatMessages array for the new chat
+                st.session_state.chat_messages = []
+                for message in st.session_state.chat_history:
+                    role = ChatMessageRole.USER if message.message_type == MessageType.USER else ChatMessageRole.ASSISTANT
+                    st.session_state.chat_messages.append(
+                        ChatMessage(role=role, content=message.message_content)
+                    )
+                st.rerun()
+        
+        with col2:
+            # Delete button with confirmation
+            if st.button("🗑️", key=f"delete_{chat_session.id}", help="Delete this conversation"):
+                # Use session state to track which chat is being deleted for confirmation
+                st.session_state.confirm_delete = chat_session.id
+
+# Handle delete confirmation
+if hasattr(st.session_state, 'confirm_delete') and st.session_state.confirm_delete:
+    chat_to_delete = st.session_state.confirm_delete
+    
+    # Find the chat session to get its title for the confirmation message
+    session_to_delete = None
+    for chat_session in user_chats:
+        if chat_session.id == chat_to_delete:
+            session_to_delete = chat_session
+            break
+    
+    if session_to_delete:
+        title = session_to_delete.title or "this chat"
+        st.sidebar.error(f"⚠️ Delete '{title}'?")
+        
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            if st.button("✅ Yes", key="confirm_yes"):
+                # Perform the deletion
+                if delete_chat_session(chat_to_delete):
+                    # If deleting current chat, reset to no chat
+                    if st.session_state.current_chat_id == chat_to_delete:
+                        st.session_state.current_chat_id = None
+                        st.session_state.chat_history = []
+                        st.session_state.chat_messages = []
+                    
+                    # Clear confirmation state
+                    del st.session_state.confirm_delete
+                    st.success("Chat deleted successfully!")
+                    st.rerun()
+                else:
+                    st.error("Failed to delete chat")
+        
+        with col2:
+            if st.button("❌ No", key="confirm_no"):
+                # Cancel deletion
+                del st.session_state.confirm_delete
+                st.rerun()
 
 # Main chat interface
 st.title("🤖 AI Chatbot")

@@ -1,4 +1,4 @@
-from .config_table import Base, ConfigKV, ChatHistory, MessageType
+from .config_table import Base, ConfigKV, ChatHistory, MessageType, ChatSession
 
 # Export all models
-__all__ = ['Base', 'ConfigKV', 'ChatHistory', 'MessageType']
+__all__ = ['Base', 'ConfigKV', 'ChatHistory', 'MessageType', 'ChatSession']
