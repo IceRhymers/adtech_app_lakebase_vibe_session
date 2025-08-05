@@ -5,7 +5,7 @@ resources:
       name: adtech_vector_chat_job
 
       schedule:
-        quartz_cron_expression: '0 0 * * * ?'  # Run every hour
+        quartz_cron_expression: '0 0/5 * * * ?'  # Run every 5 minutes
         timezone_id: UTC
         pause_status: UNPAUSED
 

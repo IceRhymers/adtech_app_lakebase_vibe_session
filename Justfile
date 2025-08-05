@@ -113,7 +113,7 @@ app-permissions: bundle-deploy
     fi
 
 # Deploy Agent to Databricks
-agent-deploy:
+agent-deploy: bundle-deploy
     databricks bundle run adtech_chat_history_agent_job
 
 # Deploy the app to Databricks
@@ -124,7 +124,7 @@ app-deploy:
     databricks apps deploy "$APP_NAME" --source-code-path "$WORKSPACE_PATH/app"
 
 # Full end to end deployment.
-full-deploy: terraform-full bundle-deploy migrations-upgrade app-permissions app-start app-deploy
+full-deploy: terraform-full bundle-deploy venv migrations-upgrade app-permissions app-start app-deploy
     echo "Full deploy complete"
 
 # Clean up the virtual environment

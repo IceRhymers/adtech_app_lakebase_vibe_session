@@ -87,6 +87,78 @@ def update_session_timestamp(session_id: str):
             chat_session.updated_at = datetime.utcnow()
             session.commit()
 
+def generate_title_with_llama(context_text: str) -> str:
+    """Generate a concise title using the Llama model endpoint"""
+    try:
+        # Create a focused prompt for title generation
+        title_prompt = f"""Generate a concise title for this conversation in exactly 15 words or fewer. Return only the title, no quotes, no explanations:
+
+{context_text}
+
+Title:"""
+        
+        # Create message for the Llama endpoint
+        messages = [ChatMessage(
+            role=ChatMessageRole.USER,
+            content=title_prompt
+        )]
+        
+        # Convert to the format expected by the endpoint
+        message_dicts = []
+        for msg in messages:
+            message_dicts.append({
+                "role": msg.role.value,
+                "content": msg.content
+            })
+        
+        payload = {
+            "messages": message_dicts,
+            "max_tokens": 50,
+            "temperature": 0.1  # Low temperature for consistent, focused output
+        }
+        
+        payload_json = json.dumps(payload)
+        
+        # Use the Llama endpoint specifically for title generation
+        response = client.api_client.do(
+            method="POST",
+            path="/serving-endpoints/databricks-meta-llama-3-3-70b-instruct/invocations",
+            headers={"Content-Type": "application/json"},
+            data=payload_json
+        )
+        
+        # Extract the response text
+        if isinstance(response, list) and len(response) > 0:
+            title = response[0].strip()
+        elif isinstance(response, dict) and 'choices' in response:
+            title = response['choices'][0]['message']['content'].strip()
+        else:
+            title = str(response).strip()
+        
+        # Clean up the title
+        title = title.strip().strip('"').strip("'").strip()
+        
+        # Remove common prefixes that might appear
+        prefixes_to_remove = ["Title:", "title:", "TITLE:", "Generated title:", "The title is:", "Here's a title:"]
+        for prefix in prefixes_to_remove:
+            if title.lower().startswith(prefix.lower()):
+                title = title[len(prefix):].strip()
+        
+        # Ensure it's not too long (15 words max)
+        words = title.split()
+        if len(words) > 15:
+            title = " ".join(words[:15])
+        
+        # Limit character length as well
+        if len(title) > 60:
+            title = title[:57] + "..."
+        
+        return title if title else "New Chat"
+        
+    except Exception as e:
+        print(f"Error generating title with Llama: {str(e)}")
+        return "New Chat"
+
 def generate_chat_title(session_id: str) -> str:
     """Generate an AI-powered title for a chat session"""
     try:
@@ -104,23 +176,12 @@ def generate_chat_title(session_id: str) -> str:
             context = []
             for msg in messages:
                 role = "User" if msg.message_type == MessageType.USER else "Assistant"
-                context.append(f"{role}: {msg.message_content[:100]}...")  # Limit length
+                context.append(f"{role}: {msg.message_content[:150]}...")  # Limit length
             
             context_text = "\n".join(context)
             
-            # Create title generation payload
-            title_messages = [ChatMessage(
-                role=ChatMessageRole.USER,
-                content=f"Generate a concise 3-5 word title for this conversation. Just return the title, nothing else:\n\n{context_text}"
-            )]
-            
-            # Use existing AI endpoint for title generation
-            title = generate_bot_response(title_messages)
-            
-            # Clean up the response (remove quotes, extra text, etc.)
-            title = title.strip().strip('"').strip("'")
-            if len(title) > 50:  # Limit title length
-                title = title[:47] + "..."
+            # Use the new Llama-based title generation
+            title = generate_title_with_llama(context_text)
             
             # Update the session with the new title
             chat_session = session.query(ChatSession).filter(
@@ -249,8 +310,6 @@ def generate_bot_response(messages: list[ChatMessage]) -> str:
         }
 
         payload_json = json.dumps(payload)
-        print(payload_json)
-        print("--------------------------------")
         
         # Use the workspace client to query the chat endpoint with dataframe records
         # response = client.serving_endpoints.query(
