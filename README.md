@@ -1,9 +1,8 @@
-# Key-Value Configuration Editor with Databricks Lakebase
+# AI Chatbot with Databricks Lakebase and Vector Search
 
-This project provides a simple Streamlit application for managing key-value pairs in a PostgreSQL database provisioned via Databricks Lakebase. The infrastructure is managed with Terraform, and the app is designed for secure, real-time configuration management.
+This project provides a sophisticated AI chatbot application built with Streamlit that leverages Databricks Lakebase for data persistence and includes vector search capabilities for intelligent conversation handling. The infrastructure is managed with Terraform, and the app includes data pipelines for chat history management and AI agent functionality.
 
 ---
-
 
 ### Required Tools
 
@@ -11,6 +10,7 @@ This project provides a simple Streamlit application for managing key-value pair
 - **[Terraform](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli)** - Infrastructure as Code tool for provisioning Databricks Lakebase resources
 - **[jq](https://stedolan.github.io/jq/download/)** - Lightweight command-line JSON processor used in deployment scripts
 - **[just](https://github.com/casey/just#installation)** - Command runner for executing project tasks and workflows
+- **[uv](https://github.com/astral-sh/uv)** - Fast Python package installer and resolver
 
 ### Installation Options
 
@@ -26,6 +26,7 @@ brew install databricks/tap/databricks
 brew install terraform
 brew install jq
 brew install just
+pip install uv
 ```
 
 #### Manual Installation
@@ -33,6 +34,7 @@ brew install just
 - **Terraform**: Download from [terraform.io](https://developer.hashicorp.com/terraform/downloads)
 - **jq**: Available on most package managers or download from [jqlang.github.io/jq](https://jqlang.github.io/jq/download/)
 - **just**: Install via [cargo](https://crates.io/crates/just) or download from [GitHub releases](https://github.com/casey/just/releases)
+- **uv**: Install with `pip install uv` or follow [installation guide](https://github.com/astral-sh/uv)
 
 ### Verification
 After installation, verify all tools are working:
@@ -42,21 +44,23 @@ databricks --version
 terraform --version
 jq --version
 just --version
+uv --version
 ```
 
 ## Quick Start
 
-### 0. Full send deployment, no edit.
+### 0. Full End-to-End Deployment
 
-If you want to just get straight into the vibe, this project can build and deploy end to end with `just full-deploy` using your default Databricks CLI profile. But more careful instructions are below.
+If you want to get straight into the experience, this project can build and deploy end to end with `just full-deploy` using your default Databricks CLI profile. But more careful instructions are below.
 
-### 1. Clone repo and edit bundle.
+### 1. Clone Repository and Configure Bundle
 
 ```bash
-git clone <<this repo whenever I make it>
+git clone <this-repository-url>
+cd adtech_app_lakebase_vibe_session
 ```
 
-Then you need to edit the `databricks.yml` to point to your workspace
+Edit the `databricks.yml` to point to your workspace:
 
 ```yaml
 targets:
@@ -67,34 +71,35 @@ targets:
       host: https://YOUR_WORKSPACE_HERE.cloud.databricks.com
 ```
 
-### 2. Deploy Infrastructure (Postgres via Databricks Lakebase)
+### 2. Deploy Infrastructure (PostgreSQL via Databricks Lakebase)
 
-All infrastructure is managed with Terraform. This will provision a PostgreSQL instance in Databricks Lakebase and set up a group that will be used for access roles. This will use your default CLI profile and can be changed in `main.tf` if required. You can easily run the terraform with 
+All infrastructure is managed with Terraform. This will provision a PostgreSQL instance in Databricks Lakebase and set up a group for access roles:
 
 ```bash
-# Optionally generate terraform inputs for instance and group name overrides
+# Initialize and deploy terraform in one command
+just terraform-full
+```
+
+Or step by step:
+
+```bash
+# Generate terraform variables (optional customization)
 just terraform-init-vars
 # Initialize Terraform
 just terraform-init
 # Review the plan
 just terraform-plan
-# Apply the infrastructure (creates the Postgres DB and workspace group)
+# Apply the infrastructure
 just terraform-apply
 ```
 
-Or just simply
-
-`just terraform-full`
-
-After applying, Terraform will output the connection string and group info. Save these for configuring the app.
+After applying, Terraform will output the connection string and group info.
 
 ---
 
-### 3. Set Up the App
+### 3. Set Up the Application
 
-The app is located in the `app/` directory. You can use the Justfile for common actions. 
-
-#### a. Create a Python Virtual Environment and Install Dependencies
+#### a. Create Python Virtual Environment and Install Dependencies
 
 ```bash
 just venv
@@ -102,100 +107,202 @@ just venv
 
 #### b. Configure Environment Variables
 
-The app uses `app/app.yml` to configure environment variables for Databricks Apps, and will work when using `just run` to run locally. The configuration includes:
+The app uses `app/app.yml` to configure environment variables. The default configuration includes:
 
 ```yaml
 env:
   - name: "LAKEBASE_DB_NAME"
-    value: "vibe-session-db"
+    value: "tannerw-adtech-db"
   - name: "POSTGRES_GROUP"
-    value: "Vibe Session DB Access Role"
+    value: "Tanner W Adtech DB Access Role"
+  - name: "AGENT_ENDPOINT"
+    value: "tanner_wendland-default-chat_history_agent"
 ```
 
-| Variable Name      | Description                                                | Example Value                    | Required |
-|--------------------|------------------------------------------------------------|----------------------------------|----------|
-| `LAKEBASE_DB_NAME` | Name of the Databricks Lakebase Postgres database instance | `vibe-session-db`                | Yes      |
-| `POSTGRES_GROUP`   | Name of the Databricks group with access to the database   | `Vibe Session DB Access Role`    | No      |
+| Variable Name      | Description                                                | Example Value                           | Required |
+|--------------------|------------------------------------------------------------|-----------------------------------------|----------|
+| `LAKEBASE_DB_NAME` | Name of the Databricks Lakebase Postgres database instance | `tannerw-adtech-db`                     | Yes      |
+| `POSTGRES_GROUP`   | Name of the Databricks group with access to the database   | `Tanner W Adtech DB Access Role`        | No       |
+| `AGENT_ENDPOINT`   | Name of the serving endpoint for the AI agent             | `tanner_wendland-default-chat_history_agent` | No       |
 
+Update these values in `app/app.yml` to match your environment.
 
-If you need to override these values for different environments, you can modify the `app.yml` file or use the `valueFrom` field to reference external sources like secrets. 
+#### c. Configure Alembic.ini
 
-#### c. Configure `alemblic.ini`
-
-If you changed the name of the database instance in terraform, you'll need to configure `alembic.ini` to look for your database instance. The default values align to what terraform deploys out of the box.
+If you changed the database instance name in terraform, configure `app/alembic.ini` to match your database instance name.
 
 #### d. Run Database Migrations
 
-Before running the app, you need to apply the database migrations to set up the PostgreSQL role and permissions:
+Apply database migrations to set up the chat history tables:
 
 ```bash
 just migrations-upgrade
 ```
 
-This migration creates the PostgreSQL role for the Databricks group and grants the necessary permissions (SELECT, INSERT, UPDATE, DELETE) on the database tables.
+This creates the necessary tables for chat sessions and message history.
 
-#### e. Run the App
+#### e. Run the Application
 
-You may need to configure the Databricks SDK with environment variables to run locally, since the default credential chain doesn't work. 
+For local development, you may need to configure the Databricks SDK:
 
 ```bash
 export DATABRICKS_CONFIG_PROFILE=DEFAULT
 ```
 
+Then run the app:
+
 ```bash
 just run
-# or, manually:
-streamlit run app.py
 ```
 
 ---
 
 ## Features
-- Add, edit, and delete key-value pairs
-- Real-time updates and duplicate key prevention
-- Secure connection to Databricks Lakebase Postgres
-- Role-based access via Databricks groups
+
+### Chatbot Application
+- 🤖 **AI-powered conversations** with persistent history
+- 💾 **Full conversation history** saved to PostgreSQL database
+- 🧵 **Multiple chat sessions** with easy switching
+- 👤 **User identification** via Databricks authentication
+- 🔄 **Real-time chat interface** with Streamlit
+
+### Data Pipelines
+- 📊 **Chat History Sync** - Syncs chat data for analysis
+- 🔍 **Vector Search Integration** - Enables semantic search over conversations
+- 🤖 **AI Agent Jobs** - Automated processing of chat history
+- ⏰ **Scheduled Jobs** - Automated data pipeline execution
+
+### Infrastructure
+- 🏗️ **Terraform-managed infrastructure** - PostgreSQL via Databricks Lakebase
+- 🔐 **Role-based access control** via Databricks groups
+- 🚀 **Databricks Apps deployment** with automated permissions
 
 ---
 
+## Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Streamlit App │◄──►│  PostgreSQL DB  │    │ Data Pipelines  │
+│                 │    │   (Lakebase)    │◄──►│  (Notebooks)    │
+│                 │    └─────────────────┘    └─────────────────┘
+│                 │                                     │
+│                 │    ┌─────────────────┐              │
+│                 │◄──►│  AI Agent       │◄─────────────┘
+└─────────────────┘    │  Endpoint       │
+                       └─────────────────┘
+```
+
+**Component Interactions:**
+- **Streamlit App** ↔ **PostgreSQL DB**: Stores and retrieves chat sessions and message history
+- **Streamlit App** ↔ **AI Agent Endpoint**: Sends user messages and receives AI responses
+- **Data Pipelines** ↔ **PostgreSQL DB**: Syncs chat history for vector search and analysis
+- **Data Pipelines** → **AI Agent**: Prepares and enhances the agent with chat history context
+
 ## Dependencies
+
 - Python 3.10+
 - streamlit==1.38.0
 - sqlalchemy==2.0.30
 - alembic==1.13.1
 - databricks-sdk==0.58.0
 - psycopg2-binary==2.9.9
+- debugpy==1.8.15
 
-> **Note:** Some dependencies are pre-installed in Databricks Apps. See the [workspace rules](#) for version alignment.
+> **Note:** Some dependencies are pre-installed in Databricks Apps. See the workspace rules for version alignment.
 
 ---
 
 ## Database Schema
-The app uses a simple table:
+
+The application uses the following main tables:
 
 ```sql
-CREATE TABLE config_kv (
-    id INTEGER PRIMARY KEY,
-    key VARCHAR UNIQUE NOT NULL,
-    value VARCHAR NOT NULL
+-- Chat sessions
+CREATE TABLE chat_sessions (
+    id UUID PRIMARY KEY,
+    user_name VARCHAR NOT NULL,
+    session_title VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Chat history/messages
+CREATE TABLE chat_history (
+    id UUID PRIMARY KEY,
+    chat_session_id UUID REFERENCES chat_sessions(id),
+    message_type VARCHAR NOT NULL,  -- 'USER' or 'ASSISTANT'
+    message_content TEXT NOT NULL,
+    message_order INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 ---
 
-## More Information
-- For detailed app usage, see [`app/README.md`](app/README.md)
-- For migration and database management, use the Justfile commands (e.g., `just migrations-generate`, `just migrations-upgrade`)
-- For deployment, see the Justfile for `bundle-deploy`, `app-deploy`, and related commands
+## Data Pipelines
+
+The project includes several data pipeline notebooks in `data_pipelines/src/`:
+
+1. **`00-postgres-catalog.ipynb`** - Sets up catalog connection to PostgreSQL
+2. **`01-sync-chat-history.ipynb`** - Syncs chat history for vector search
+3. **`02-chat-history-agent.ipynb`** - Creates AI agent for chat analysis
+
+These are orchestrated via Databricks Jobs defined in `resources/adtech_vector_chat.job.yml`.
+
+---
+
+## Available Commands
+
+### Environment Setup
+- `just venv` - Create virtual environment and install dependencies
+- `just clean` - Remove virtual environment and cache files
+
+### Infrastructure
+- `just terraform-init` - Initialize terraform
+- `just terraform-plan` - Plan terraform changes
+- `just terraform-apply` - Apply terraform changes
+- `just terraform-full` - Deploy terraform end-to-end
+- `just terraform-destroy` - Destroy terraform infrastructure
+
+### Database Management
+- `just migrations-generate "message"` - Generate new migration
+- `just migrations-upgrade` - Apply pending migrations
+- `just jdbc-url` - Get JDBC connection string
+- `just wait-for-database` - Wait for database to be available
+
+### Development
+- `just run` - Run application locally
+
+### Deployment
+- `just bundle-deploy` - Deploy Databricks bundle
+- `just app-start` - Start app compute
+- `just app-stop` - Stop app compute
+- `just app-deploy` - Deploy app to running compute
+- `just app-permissions` - Configure app permissions
+- `just agent-deploy` - Deploy data pipeline agent
+- `just full-deploy` - Complete end-to-end deployment
 
 ---
 
 ## Security & Best Practices
+
 - Uses Databricks workspace authentication and secure SSL connections
-- Input validation and duplicate key prevention
 - Role-based access control via Databricks groups
+- Automatic service principal management for app permissions
+- Input validation and SQL injection prevention
+- Secure handling of chat history and user data
+
+---
+
+## More Information
+
+- For detailed app usage, see [`app/README.md`](app/README.md)
+- For data pipeline details, explore the notebooks in `data_pipelines/src/`
+- Use `just --list` to see all available commands with descriptions
 
 ---
 
 ## License
+
 MIT 
