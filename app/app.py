@@ -1,6 +1,8 @@
 import os
 import streamlit as st
 import uuid
+import pandas as pd
+import json
 from datetime import datetime
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
@@ -93,13 +95,45 @@ def generate_bot_response(messages: list[ChatMessage]) -> str:
         if not agent_endpoint:
             return "Error: AGENT_ENDPOINT environment variable not configured."
         
-        # Use the workspace client to query the chat endpoint with message history
-        response = client.serving_endpoints.query(
-            name=agent_endpoint,
-            messages=messages
+        # Convert ChatMessage objects to simple dictionaries
+        message_dicts = []
+        for msg in messages:
+            message_dicts.append({
+                "role": msg.role.value,  # Convert enum to string
+                "content": msg.content
+            })
+        
+        # Create the payload structure expected by the agent
+        # TODO: FIX
+
+        payload = {
+            "messages": message_dicts,
+            "custom_inputs": {
+                "filters": {
+                    "user_name": current_user
+                }
+            }
+        }
+
+        payload_json = json.dumps(payload)
+        print(payload_json)
+        print("--------------------------------")
+        
+        # Use the workspace client to query the chat endpoint with dataframe records
+        # response = client.serving_endpoints.query(
+        #     name=agent_endpoint,
+        #     inputs=payload_json
+        # )
+
+        response = client.api_client.do(
+            method="POST",
+            path=f"/serving-endpoints/{agent_endpoint}/invocations",
+            headers={"Content-Type": "application/json"},
+            data=payload_json
         )
         
-        return response.choices[0].message.content
+        print(response)
+        return response[0]
             
     except Exception as e:
         return f"Error calling model serving endpoint: {str(e)}"

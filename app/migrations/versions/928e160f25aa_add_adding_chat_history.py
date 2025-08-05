@@ -42,4 +42,5 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_chat_history_chat_id'), table_name='chat_history')
     op.drop_index('idx_chat_user_order', table_name='chat_history')
     op.drop_table('chat_history')
+    op.execute('DROP TYPE IF EXISTS messagetype;')
     # ### end Alembic commands ###
