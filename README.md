@@ -184,20 +184,23 @@ just run
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Streamlit App │◄──►│  PostgreSQL DB  │    │ Data Pipelines  │
-│                 │    │   (Lakebase)    │◄──►│  (Notebooks)    │
+│                 │    │   (Lakebase)    │────│  (Notebooks)    │
 │                 │    └─────────────────┘    └─────────────────┘
 │                 │                                     │
 │                 │    ┌─────────────────┐              │
-│                 │◄──►│  AI Agent       │◄─────────────┘
-└─────────────────┘    │  Endpoint       │
-                       └─────────────────┘
+│                 │◄──►│  AI Agent       │              ▼
+└─────────────────┘    │  Endpoint       │    ┌─────────────────┐
+                       │                 │◄───│ Delta Tables &  │
+                       └─────────────────┘    │ Vector Search   │
+                                              └─────────────────┘
 ```
 
 **Component Interactions:**
 - **Streamlit App** ↔ **PostgreSQL DB**: Stores and retrieves chat sessions and message history
-- **Streamlit App** ↔ **AI Agent Endpoint**: Sends user messages and receives AI responses
-- **Data Pipelines** ↔ **PostgreSQL DB**: Syncs chat history for vector search and analysis
-- **Data Pipelines** → **AI Agent**: Prepares and enhances the agent with chat history context
+- **Streamlit App** ↔ **AI Agent Endpoint**: Sends user messages and receives AI responses with vector search context
+- **Data Pipelines** → **PostgreSQL DB**: Reads chat history from PostgreSQL
+- **Data Pipelines** → **Delta Tables & Vector Search**: Transforms and loads chat data for semantic search
+- **AI Agent Endpoint** ← **Vector Search**: Uses vector search to find relevant conversation context for responses
 
 ## Dependencies
 
