@@ -53,6 +53,8 @@ body {
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 	white-space: pre-wrap;
 	word-break: break-word;
+		font-size: 0.95rem; /* slightly smaller base */
+		line-height: 1.4;
 }
 .chat-bubble.user {
 	background: rgba(var(--accent-rgb), 0.08);
@@ -66,6 +68,55 @@ body {
 	color: #222;
 	border-bottom-left-radius: 4px;
 }
+
+	/* Markdown tweaks inside chat bubbles */
+	.chat-bubble h1,
+	.chat-bubble h2,
+	.chat-bubble h3,
+	.chat-bubble h4,
+	.chat-bubble h5,
+	.chat-bubble h6 {
+		margin: 0.25rem 0;
+		font-weight: 600;
+	}
+	.chat-bubble h1 { font-size: 1.35rem; }
+	.chat-bubble h2 { font-size: 1.2rem; }
+	.chat-bubble h3 { font-size: 1.1rem; }
+	.chat-bubble h4 { font-size: 1.0rem; }
+	.chat-bubble h5 { font-size: 0.95rem; }
+	.chat-bubble h6 { font-size: 0.9rem; }
+	.chat-bubble p {
+		margin: 0.25rem 0;
+	}
+	.chat-bubble ul,
+	.chat-bubble ol {
+		margin: 0.25rem 1rem;
+		padding-left: 1.25rem;
+	}
+	.chat-bubble pre {
+		background: #111827;
+		color: #e5e7eb;
+		padding: 0.5rem 0.6rem;
+		border-radius: 8px;
+		overflow-x: auto;
+		white-space: pre;
+		font-size: 0.9rem;
+	}
+	.chat-bubble code {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+		background: rgba(0, 0, 0, 0.06);
+		padding: 0.1rem 0.25rem;
+		border-radius: 6px;
+		font-size: 0.9rem;
+	}
+	.chat-bubble pre code {
+		background: transparent;
+		padding: 0;
+	}
+	.chat-bubble a {
+		color: var(--accent);
+		text-decoration: underline;
+	}
 
 .message-meta {
 	padding: 0 0.25rem;

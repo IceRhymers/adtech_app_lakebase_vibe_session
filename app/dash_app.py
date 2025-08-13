@@ -305,7 +305,11 @@ def build_app() -> Dash:
                 html.Div(
                     [
                         html.Div("You" if is_user else "Assistant", className="message-meta small text-muted"),
-                        html.Div(m["content"], className=f"chat-bubble {'user' if is_user else 'assistant'}"),
+                        dcc.Markdown(
+                            m["content"],
+                            className=f"chat-bubble {'user' if is_user else 'assistant'}",
+                            link_target="_blank",
+                        ),
                         html.Div(meta, className="message-status small text-muted"),
                     ],
                     className=f"message-row {'from-user' if is_user else 'from-assistant'}",
