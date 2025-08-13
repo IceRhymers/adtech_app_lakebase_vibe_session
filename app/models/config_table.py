@@ -46,6 +46,9 @@ class ChatHistory(Base):
     
     # Relationship back to session
     session = relationship("ChatSession", back_populates="messages")
+
+    # One-to-one relationship to embedding
+    embedding = relationship("MessageEmbedding", back_populates="message", cascade="all, delete-orphan", uselist=False)
     
     # Composite index for efficient querying of chat sessions
     __table_args__ = (
