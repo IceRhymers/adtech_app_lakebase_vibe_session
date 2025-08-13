@@ -32,24 +32,27 @@ class AgentService:
 
             system_prompt = (
                 """
-        You are a helpful assistant that can answer questions and help with tasks, you are also able to search the chat history for relevant information. 
+        You are a helpful assistant that can answer questions and help with tasks, you are also able to search the chat history for relevant information.
         If the user asks a question that is not related to the chat history, you shouldn't mention you couldn't find anything related to the question.
         """
-            )
+            ).strip()
 
             limited_messages = messages[-max_context_messages:] if messages else []
-            context_messages = [
-                ChatMessage(role=ChatMessageRole.SYSTEM, content=system_prompt)
-            ] + limited_messages
 
+            # Build messages list compatible with Databricks Claude chat API: only user/assistant in messages, system provided separately.
             message_dicts = []
-            for msg in context_messages:
+            for msg in limited_messages:
+                # Skip any empty messages to satisfy API requirement
+                if not msg.content or not str(msg.content).strip():
+                    continue
+                role_value = "user" if msg.role == ChatMessageRole.USER else "assistant"
                 message_dicts.append({
-                    "role": msg.role.value,
+                    "role": role_value,
                     "content": msg.content,
                 })
 
             payload = {
+                "system": system_prompt,
                 "messages": message_dicts,
                 "custom_inputs": {
                     "filters": {
@@ -67,7 +70,12 @@ class AgentService:
                 data=payload_json,
             )
 
-            return response[0]
+            # Normalize common response shapes
+            if isinstance(response, list) and len(response) > 0:
+                return response[0]
+            if isinstance(response, dict) and "choices" in response:
+                return response["choices"][0]["message"]["content"]
+            return str(response)
         except Exception as e:
             return f"Error calling model serving endpoint: {str(e)}"
 

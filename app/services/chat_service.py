@@ -233,6 +233,20 @@ Title:"""
 
     def save_message(self, chat_id: str, message_type: MessageType, content: str, message_order: int) -> None:
         with Session(self.engine) as session:
+            # Idempotency guard: skip if message already exists
+            existing = (
+                session.query(ChatHistory)
+                .filter(
+                    ChatHistory.chat_id == chat_id,
+                    ChatHistory.user_name == self.current_user,
+                    ChatHistory.message_type == message_type,
+                    ChatHistory.message_order == message_order,
+                )
+                .first()
+            )
+            if existing:
+                return
+
             message = ChatHistory(
                 chat_id=chat_id,
                 user_name=self.current_user,
@@ -273,6 +287,27 @@ Title:"""
 
         with Session(self.engine) as session:
             with session.begin():
+                # Idempotency guard: skip if message already exists
+                existing = (
+                    session.query(ChatHistory)
+                    .filter(
+                        ChatHistory.chat_id == chat_id,
+                        ChatHistory.user_name == self.current_user,
+                        ChatHistory.message_type == message_type,
+                        ChatHistory.message_order == message_order,
+                    )
+                    .first()
+                )
+                if existing:
+                    # Optionally update content if it's different (assistant finalization), but avoid re-inserting
+                    if existing.message_content != content:
+                        existing.message_content = content
+                    # Ensure session timestamp is current
+                    chat_session = session.get(ChatSession, chat_id)
+                    if chat_session:
+                        chat_session.updated_at = datetime.utcnow()
+                    return
+
                 message = ChatHistory(
                     chat_id=chat_id,
                     user_name=self.current_user,
