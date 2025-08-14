@@ -117,7 +117,7 @@ agent-deploy: bundle-deploy
     databricks bundle run adtech_chat_history_agent_job
 
 # Deploy the app to Databricks
-app-deploy:
+app-deploy: bundle-deploy
     APP_NAME=$(databricks bundle summary -o json | jq -r '.resources.apps | to_entries | first | .value.name') && \
     WORKSPACE_PATH=$(databricks bundle summary -o json | jq -r '.workspace.file_path') && \
     echo "Deploying app: $APP_NAME" && \

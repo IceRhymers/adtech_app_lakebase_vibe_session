@@ -153,11 +153,11 @@ Title:"""
                         ChatHistory.user_name == self.current_user,
                     )
                     .order_by(ChatHistory.message_order)
-                    .limit(4)
+                    .limit(5)
                     .all()
                 )
 
-                if len(messages) < 2:
+                if len(messages) == 0:
                     return "New Chat"
 
                 context_parts: List[str] = []
@@ -331,6 +331,25 @@ Title:"""
                 chat_session = session.get(ChatSession, chat_id)
                 if chat_session:
                     chat_session.updated_at = datetime.utcnow()
+
+        # Auto-generate a title once the conversation has a few messages, if not already titled
+        try:
+            if message_order >= 3:
+                with Session(self.engine) as session:
+                    chat_session = (
+                        session.query(ChatSession)
+                        .filter(
+                            ChatSession.id == chat_id,
+                            ChatSession.user_name == self.current_user,
+                        )
+                        .first()
+                    )
+                    if chat_session and not chat_session.title:
+                        # Will set and persist the title internally
+                        self.generate_chat_title(chat_id)
+        except Exception:
+            # Non-blocking best-effort
+            pass
 
     def get_next_message_order(self, chat_id: str) -> int:
         with Session(self.engine) as session:

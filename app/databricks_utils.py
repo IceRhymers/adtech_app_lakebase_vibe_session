@@ -1,5 +1,5 @@
 from databricks.sdk import WorkspaceClient
-import streamlit as st
+import flask
 import os
 
 def get_workspace_client():
@@ -14,22 +14,33 @@ def get_workspace_client():
         return WorkspaceClient(profile=profile)
     
 def get_current_user_name() -> str:
-    """Get the current user's display name"""
-    # Check if we're in Databricks by looking for the forwarded access token
-    user_token = st.context.headers.get('X-Forwarded-Access-Token')
-    
-    if user_token:
-        # We're deployed to Databricks, try using the forwarded token first
-        try:
-            databricks_client = WorkspaceClient(token=user_token, auth_type="pat")
-            user_info = databricks_client.current_user.me()
-            return user_info.user_name
-        except Exception as token_error:
-            # Token failed (insufficient scopes, invalid token, etc.), fall back to global client
-            user_info = get_workspace_client().current_user.me()
-            return user_info.user_name
-    else:
-        # Local development, use the global client
-        user_info = get_workspace_client().current_user.me()
-        return user_info.user_name
+    """Resolve the current user's name.
+
+    - Prefer the forwarded access token header when within a request context (Databricks Apps proxy).
+    - Otherwise, fall back to the default WorkspaceClient (profile/env-based auth).
+    - As a last resort in local dev, return OS user to avoid crashing the app shell.
+    """
+    # Try forwarded token only when there is an active Flask request context
+    try:
+        if flask.has_request_context():
+            token = flask.request.headers.get('X-Forwarded-Access-Token')
+            if token:
+                try:
+                    client_with_token = WorkspaceClient(token=token, auth_type="pat")
+                    me = client_with_token.current_user.me()
+                    return me.user_name
+                except Exception:
+                    # Fall back to the default client if token-based auth fails
+                    pass
+    except Exception:
+        # If anything goes wrong probing request headers, ignore and fall back below
+        pass
+
+    # Fallback: use workspace client from the configured profile/env
+    try:
+        me = get_workspace_client().current_user.me()
+        return me.user_name
+    except Exception:
+        # Final non-fatal fallback for local development only
+        return os.getenv("USER") or "unknown"
         

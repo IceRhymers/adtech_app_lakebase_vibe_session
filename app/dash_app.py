@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 import logging
@@ -9,7 +10,7 @@ from dash import Dash, Input, Output, State, dcc, html, no_update, ALL, ctx
 import dash_bootstrap_components as dbc
 
 from lakebase import get_engine
-from databricks_utils import get_workspace_client
+from databricks_utils import get_workspace_client, get_current_user_name
 from models import MessageType
 from services.chat_service import ChatService
 from services.agent_service import AgentService
@@ -37,10 +38,11 @@ def build_app() -> Dash:
 
     db_name = os.getenv("LAKEBASE_DB_NAME", "vibe-session-db")
     engine = get_engine(client, db_name)
-    # In Dash/Flask, use the default Databricks auth chain or configured profile
-    current_user = get_workspace_client().current_user.me().user_name
 
-    chat_service = ChatService(engine, current_user)
+    # Build services per-request/user instead of at import time
+    def service_for(user_name: str) -> ChatService:
+        return ChatService(engine, user_name)
+
     agent_service = AgentService()
 
     app = Dash(
@@ -50,131 +52,157 @@ def build_app() -> Dash:
         title="AI Chatbot",
     )
 
-    app.layout = dbc.Container(
-        [
-            dcc.Store(id="sessions-store"),
-            dcc.Store(id="chat-store"),
-            dcc.Store(id="errors-store", data=[]),
-            dcc.Store(id="delete-target"),
-             dcc.Store(id="scroll-trigger"),
-            dcc.Interval(id="tick", interval=int(os.getenv("TICK_SLOW_MS", "2000")), n_intervals=0),
-            dcc.Interval(id="sessions-tick", interval=int(os.getenv("SESSIONS_TICK_MS", "10000")), n_intervals=0),
+    # Configurable client cache TTL (ms), default 1 day
+    cache_ttl_ms = int(os.getenv("CHAT_CACHE_TTL_MS", str(24 * 60 * 60 * 1000)))
 
-            dbc.Navbar(
-                dbc.Container(
-                    [
-                        dbc.NavbarBrand("Vibe Session Chat", className="fw-semibold"),
-                        dbc.Badge(f"{current_user}", color="primary", className="ms-auto"),
-                    ],
-                    fluid=True,
+    def serve_layout():
+        # Resolve user within a real request context
+        resolved_user = get_current_user_name()
+        resolved_cache_ttl_ms = int(os.getenv("CHAT_CACHE_TTL_MS", str(24 * 60 * 60 * 1000)))
+        return dbc.Container(
+            [
+                dcc.Store(id="sessions-store", storage_type="local"),
+                dcc.Store(id="chat-store", storage_type="local"),
+                dcc.Store(id="chat-cache", storage_type="local"),
+                dcc.Store(id="user-store", data={"user": resolved_user}),
+                dcc.Store(id="config-store", data={"cacheTtlMs": resolved_cache_ttl_ms}),
+                dcc.Store(id="errors-store", data=[]),
+                dcc.Store(id="delete-target"),
+                dcc.Store(id="scroll-trigger"),
+                dcc.Interval(id="tick", interval=int(os.getenv("TICK_SLOW_MS", "2000")), n_intervals=0),
+                dcc.Interval(id="sessions-tick", interval=int(os.getenv("SESSIONS_TICK_MS", "10000")), n_intervals=0),
+
+                dbc.Navbar(
+                    dbc.Container(
+                        [
+                            dbc.NavbarBrand("Vibe Session Chat", className="fw-semibold"),
+                            dbc.Badge(f"{resolved_user}", color="primary", className="ms-auto"),
+                        ],
+                        fluid=True,
+                    ),
+                    color="light",
+                    className="rounded-3 shadow-sm my-3",
                 ),
-                color="light",
-                className="rounded-3 shadow-sm my-3",
-            ),
 
-            # Global delete confirmation modal
-            dbc.Modal(
-                [
-                    dbc.ModalHeader(dbc.ModalTitle(id="delete-modal-title")),
-                    dbc.ModalBody(id="delete-modal-body"),
-                    dbc.ModalFooter([
-                        dbc.Button("Cancel", id="cancel-delete", className="ms-auto", outline=True),
-                        dbc.Button("Delete", id="confirm-delete", color="danger"),
-                    ]),
-                ],
-                id="delete-confirm-modal",
-                is_open=False,
-                backdrop=True,
-            ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader(
+                                            html.Div(
+                                                [
+                                                    html.Span("Chat Sessions", className="fw-semibold"),
+                                                    dbc.Button("New", id="new-chat", color="primary", size="sm", className="ms-auto"),
+                                                ],
+                                                className="d-flex align-items-center gap-2",
+                                            )
+                                        ),
+                                        dbc.CardBody(
+                                            [
+                                                html.Div(id="sessions-list"),
+                                            ]
+                                        ),
+                                    ],
+                                    className="shadow-sm",
+                                ),
+                            ],
+                            width=3,
+                        ),
+                        dbc.Col(
+                            [
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader(
+                                            html.Div(
+                                                [
+                                                    html.Div(
+                                                        [
+                                                            html.Span("AI Chatbot", className="h5 mb-0"),
+                                                            html.Span(id="current-chat-title", className="text-muted ms-2 small"),
+                                                        ],
+                                                        className="d-flex align-items-center gap-2",
+                                                    ),
+                                                    html.Div(
+                                                        [
+                                                            dbc.Button(
+                                                                "AI Rename",
+                                                                id="ai-rename",
+                                                                color="secondary",
+                                                                size="sm",
+                                                                outline=True,
+                                                            ),
+                                                        ],
+                                                        className="d-flex align-items-center",
+                                                    ),
+                                                ],
+                                                className="d-flex align-items-center justify-content-between",
+                                            )
+                                        ),
+                                        dbc.CardBody(
+                                            [
+                                                html.Div(id="chat-transcript", className="chat-transcript"),
+                                            ]
+                                        ),
+                                        dbc.CardFooter(
+                                            dbc.InputGroup(
+                                                [
+                                                    dcc.Input(
+                                                        id="chat-input",
+                                                        placeholder="Type your message...",
+                                                        type="text",
+                                                        className="form-control",
+                                                    ),
+                                                    dbc.Button("Send", id="send", color="primary"),
+                                                ],
+                                                className="chat-input-group",
+                                            )
+                                        ),
+                                    ],
+                                    className="shadow-sm",
+                                ),
+                                html.Div(id="toasts"),
+                            ],
+                            width=9,
+                        ),
+                    ],
+                    className="g-3",
+                ),
+                # Global delete confirmation modal
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle(id="delete-modal-title")),
+                        dbc.ModalBody(id="delete-modal-body"),
+                        dbc.ModalFooter([
+                            dbc.Button("Cancel", id="cancel-delete", className="ms-auto", outline=True),
+                            dbc.Button("Delete", id="confirm-delete", color="danger"),
+                        ]),
+                    ],
+                    id="delete-confirm-modal",
+                    is_open=False,
+                    backdrop=True,
+                ),
+            ],
+            fluid=True,
+            className="py-2",
+        )
 
-            dbc.Row(
-                [
-                    dbc.Col(
-                        [
-                            dbc.Card(
-                                [
-                                    dbc.CardHeader(
-                                        html.Div(
-                                            [
-                                                html.Span("Chat Sessions", className="fw-semibold"),
-                                                dbc.Button("New", id="new-chat", color="primary", size="sm", className="ms-auto"),
-                                            ],
-                                            className="d-flex align-items-center gap-2",
-                                        )
-                                    ),
-                                    dbc.CardBody(
-                                        [
-                                            html.Div(id="sessions-list"),
-                                        ]
-                                    ),
-                                ],
-                                className="shadow-sm",
-                            ),
-                        ],
-                        width=3,
-                    ),
-                    dbc.Col(
-                        [
-                            dbc.Card(
-                                [
-                                    dbc.CardHeader(
-                                        html.Div(
-                                            [
-                                                html.Div(
-                                                    [
-                                                        html.Span("AI Chatbot", className="h5 mb-0"),
-                                                    ],
-                                                    className="d-flex align-items-center gap-2",
-                                                ),
-                                            ],
-                                            className="d-flex align-items-center justify-content-between",
-                                        )
-                                    ),
-                                    dbc.CardBody(
-                                        [
-                                            html.Div(id="chat-transcript", className="chat-transcript"),
-                                        ]
-                                    ),
-                                    dbc.CardFooter(
-                                        dbc.InputGroup(
-                                            [
-                                                dcc.Input(
-                                                    id="chat-input",
-                                                    placeholder="Type your message...",
-                                                    type="text",
-                                                    className="form-control",
-                                                ),
-                                                dbc.Button("Send", id="send", color="primary"),
-                                            ],
-                                            className="chat-input-group",
-                                        )
-                                    ),
-                                ],
-                                className="shadow-sm",
-                            ),
-                            html.Div(id="toasts"),
-                        ],
-                        width=9,
-                    ),
-                ],
-                className="g-3",
-            ),
-        ],
-        fluid=True,
-        className="py-2",
-    )
+    app.layout = serve_layout
 
     # Load sessions on startup
     @app.callback(
         Output("sessions-store", "data"),
         Input("sessions-tick", "n_intervals"),
         State("sessions-store", "data"),
+        State("user-store", "data"),
         prevent_initial_call=False,
     )
-    def refresh_sessions(_: int, existing: Optional[List[Dict[str, Any]]]):
+    def refresh_sessions(_: int, existing: Optional[List[Dict[str, Any]]], user_data: Optional[Dict[str, Any]] = None):
         # Periodically refresh sessions in the background so new chats appear without page reload
         def _load_sessions() -> List[Dict[str, Any]]:
-            raw = chat_service.get_user_chats()
+            user_name = (user_data or {}).get("user") or get_current_user_name()
+            raw = service_for(user_name).get_user_chats()
             return [{"id": s.id, "title": s.title or "Untitled"} for s in raw]
 
         submit_history_load("__sessions__", _load_sessions)
@@ -221,17 +249,37 @@ def build_app() -> Dash:
             )
         return rows
 
+    # Show current chat title in header
+    @app.callback(
+        Output("current-chat-title", "children"),
+        Input("sessions-store", "data"),
+        Input("chat-store", "data"),
+    )
+    def render_current_title(sessions: Optional[List[Dict[str, Any]]], chat_state: Optional[Dict[str, Any]]):
+        if not chat_state or not chat_state.get("currentChatId"):
+            return ""
+        current_chat_id = chat_state.get("currentChatId")
+        if not sessions:
+            return ""
+        for s in sessions:
+            if s.get("id") == current_chat_id:
+                title = s.get("title") or "Untitled"
+                return f"— {title}"
+        return ""
+
     # Create new chat
     @app.callback(
         Output("chat-store", "data", allow_duplicate=True),
         Output("sessions-store", "data", allow_duplicate=True),
         Input("new-chat", "n_clicks"),
         State("sessions-store", "data"),
+        State("user-store", "data"),
         prevent_initial_call=True,
     )
-    def new_chat(_: int, sessions_data: Optional[List[Dict[str, Any]]]):
+    def new_chat(_: int, sessions_data: Optional[List[Dict[str, Any]]], user_data: Optional[Dict[str, Any]] = None):
         new_id = str(uuid.uuid4())
-        chat_service.create_new_chat_session(new_id)
+        user_name = (user_data or {}).get("user") or get_current_user_name()
+        service_for(user_name).create_new_chat_session(new_id)
         # Optimistically add the new chat to the sessions list so it shows immediately
         existing_sessions = sessions_data or []
         optimistic_sessions = [{"id": new_id, "title": "Untitled"}] + existing_sessions
@@ -242,9 +290,11 @@ def build_app() -> Dash:
         Output("chat-store", "data", allow_duplicate=True),
         Input({"type": "chat-select", "id": ALL}, "n_clicks"),
         State("sessions-store", "data"),
+        State("chat-cache", "data"),
+        State("user-store", "data"),
         prevent_initial_call=True,
     )
-    def select_chat(_: List[Optional[int]], sessions_data: List[Dict[str, Any]]):
+    def select_chat(_: List[Optional[int]], sessions_data: List[Dict[str, Any]], cache_state: Optional[Dict[str, Any]], user_data: Optional[Dict[str, Any]] = None):
         # Fire only on a real button click (n_clicks > 0). Pattern-matching inputs
         # can trigger when components are created; guard against that.
         trigger = ctx.triggered_id
@@ -262,7 +312,8 @@ def build_app() -> Dash:
 
         # Kick off background load for history to keep UI responsive
         def _load() -> List[Dict[str, Any]]:
-            history = chat_service.load_chat_history(selected_id)
+            user_name = (user_data or {}).get("user") or get_current_user_name()
+            history = service_for(user_name).load_chat_history(selected_id)
             msgs: List[Dict[str, Any]] = []
             for m in history:
                 msgs.append({
@@ -279,7 +330,25 @@ def build_app() -> Dash:
         submit_history_load(selected_id, _load)
         logger.debug("select_chat: selected_id=%s queued load", selected_id)
 
-        # Immediate optimistic state with loading indicator
+        # If we have cached messages for this chat, show them immediately while background refresh runs
+        try:
+            chats_cache = (cache_state or {}).get("chats") if isinstance(cache_state, dict) else None
+            if isinstance(chats_cache, dict) and selected_id in chats_cache:
+                cached_entry = chats_cache.get(selected_id) or {}
+                cached_messages = cached_entry.get("messages") or []
+                updated_at = cached_entry.get("updatedAt") or 0
+                now_ms = int(time.time() * 1000)
+                ttl_ms = cache_ttl_ms
+                try:
+                    updated_at = int(updated_at)
+                except Exception:
+                    updated_at = 0
+                if (now_ms - updated_at) <= ttl_ms:
+                    return {"currentChatId": selected_id, "messages": cached_messages, "isLoading": True}
+        except Exception:
+            pass
+
+        # Fallback: show loading indicator
         return {"currentChatId": selected_id, "messages": [], "isLoading": True}
 
     # Render transcript
@@ -328,9 +397,10 @@ def build_app() -> Dash:
         Input("chat-input", "n_submit"),
         State("chat-input", "value"),
         State("chat-store", "data"),
+        State("user-store", "data"),
         prevent_initial_call=True,
     )
-    def send_message(_: Optional[int], __: Optional[int], text: Optional[str], chat_state: Optional[Dict[str, Any]]):
+    def send_message(_: Optional[int], __: Optional[int], text: Optional[str], chat_state: Optional[Dict[str, Any]], user_data: Optional[Dict[str, Any]] = None):
         if not text:
             return no_update, no_update, no_update
         if not chat_state or not chat_state.get("currentChatId"):
@@ -369,7 +439,8 @@ def build_app() -> Dash:
 
         # Background save for user message
         def save_user():
-            chat_service.save_message_with_embedding(chat_id, MessageType.USER, text, next_order)
+            user_name = (user_data or {}).get("user") or get_current_user_name()
+            service_for(user_name).save_message_with_embedding(chat_id, MessageType.USER, text, next_order)
 
         submit_save(user_message_id, save_user)
         logger.debug("send_message: queued save user_message_id=%s order=%s", user_message_id, next_order)
@@ -382,7 +453,8 @@ def build_app() -> Dash:
             for m in sorted(messages, key=lambda x: x["order"]):
                 role = ChatMessageRole.USER if m["role"] == "user" else ChatMessageRole.ASSISTANT
                 history_msgs.append(ChatMessage(role=role, content=m["content"]))
-            return agent_service.generate_bot_response(current_user, history_msgs)
+            user_name_local = (user_data or {}).get("user") or get_current_user_name()
+            return agent_service.generate_bot_response(user_name_local, history_msgs)
 
         # Databricks endpoint returns the full response; disable simulated streaming
         submit_generation(assistant_message_id, generate, simulate_stream=False)
@@ -434,13 +506,15 @@ def build_app() -> Dash:
         State("delete-target", "data"),
         State("sessions-store", "data"),
         State("chat-store", "data"),
+        State("user-store", "data"),
         prevent_initial_call=True,
     )
-    def confirm_delete(_: Optional[int], target_id: Optional[str], sessions: Optional[List[Dict[str, Any]]], chat_state: Optional[Dict[str, Any]]):
+    def confirm_delete(_: Optional[int], target_id: Optional[str], sessions: Optional[List[Dict[str, Any]]], chat_state: Optional[Dict[str, Any]] , user_data: Optional[Dict[str, Any]] = None):
         if not target_id:
             return no_update, no_update, False, None
         try:
-            chat_service.delete_chat_session(target_id)
+            user_name = (user_data or {}).get("user") or get_current_user_name()
+            service_for(user_name).delete_chat_session(target_id)
         except Exception as e:
             logging.getLogger(__name__).warning("Failed to delete chat %s: %s", target_id, e)
         # Update sessions list locally
@@ -478,6 +552,33 @@ def build_app() -> Dash:
         # Default state
         return "Delete", False, False
 
+    # AI Rename current chat using first up to 5 messages
+    @app.callback(
+        Output("sessions-store", "data", allow_duplicate=True),
+        Input("ai-rename", "n_clicks"),
+        State("chat-store", "data"),
+        State("sessions-store", "data"),
+        State("user-store", "data"),
+        prevent_initial_call=True,
+    )
+    def ai_rename_chat(_: Optional[int], chat_state: Optional[Dict[str, Any]], sessions_data: Optional[List[Dict[str, Any]]], user_data: Optional[Dict[str, Any]] = None):
+        if not chat_state or not chat_state.get("currentChatId"):
+            return no_update
+        chat_id = chat_state["currentChatId"]
+        try:
+            user_name = (user_data or {}).get("user") or get_current_user_name()
+            new_title = service_for(user_name).generate_chat_title(chat_id)
+        except Exception:
+            return no_update
+        # Optimistically update local sessions list
+        updated_sessions: List[Dict[str, Any]] = []
+        for s in (sessions_data or []):
+            if s.get("id") == chat_id:
+                updated_sessions.append({**s, "title": new_title or s.get("title") or "Untitled"})
+            else:
+                updated_sessions.append(s)
+        return updated_sessions
+
     # Tick: integrate stream/progress and save results
     @app.callback(
         Output("chat-store", "data", allow_duplicate=True),
@@ -488,9 +589,10 @@ def build_app() -> Dash:
         State("chat-store", "data"),
         State("errors-store", "data"),
         State("sessions-store", "data"),
+        State("user-store", "data"),
         prevent_initial_call="initial_duplicate",
     )
-    def tick(_: int, chat_state: Optional[Dict[str, Any]], errors_state: Optional[List[Dict[str, Any]]], sessions_data: Optional[List[Dict[str, Any]]]):
+    def tick(_: int, chat_state: Optional[Dict[str, Any]], errors_state: Optional[List[Dict[str, Any]]], sessions_data: Optional[List[Dict[str, Any]]], user_data: Optional[Dict[str, Any]] = None):
         fast_ms = int(os.getenv("TICK_FAST_MS", "150"))
         slow_ms = int(os.getenv("TICK_SLOW_MS", "2000"))
         next_interval_ms = slow_ms
@@ -550,8 +652,9 @@ def build_app() -> Dash:
                 if not m.get("error") and not m.get("saved") and m.get("content") and not m.get("saving", False):
                     order_val = m.get("order", 0)
 
-                    def save_assistant(chat_id=chat_state["currentChatId"], content=m["content"], order_val=order_val):
-                        chat_service.save_message_with_embedding(chat_id, MessageType.ASSISTANT, content, order_val)
+                    def save_assistant(chat_id=chat_state["currentChatId"], content=m["content"], order_val=order_val, user_data=user_data):
+                        user_name_inner = (user_data or {}).get("user") or get_current_user_name()
+                        service_for(user_name_inner).save_message_with_embedding(chat_id, MessageType.ASSISTANT, content, order_val)
 
                     submit_save(m["id"], save_assistant)
                     logger.debug("tick: queued save assistant_message_id=%s", m["id"])
@@ -588,10 +691,29 @@ def build_app() -> Dash:
         if not changed and loaded_sessions is None:
             return no_update, no_update, no_update, next_interval_ms
 
-        # Only update sessions-store when we actually fetched new sessions
+        # Only update sessions-store when we actually fetched new sessions.
+        # Merge with existing to preserve optimistic items (e.g., just-created chats)
         sessions_out = no_update
         if loaded_sessions is not None:
-            sessions_out = loaded_sessions
+            try:
+                existing_by_id = {s.get("id"): s for s in (sessions_data or []) if s and s.get("id")}
+                loaded_by_id = {s.get("id"): s for s in (loaded_sessions or []) if s and s.get("id")}
+                # Start with loaded (authoritative), then add any existing not in loaded
+                merged: List[Dict[str, Any]] = []
+                # Preserve loaded order
+                for s in loaded_sessions:
+                    sid = s.get("id")
+                    # If we had a local title change, keep the newer title if present
+                    if sid in existing_by_id and existing_by_id[sid].get("title") and not s.get("title"):
+                        merged.append({**s, "title": existing_by_id[sid].get("title")})
+                    else:
+                        merged.append(s)
+                for sid, s in existing_by_id.items():
+                    if sid not in loaded_by_id:
+                        merged.append(s)
+                sessions_out = merged
+            except Exception:
+                sessions_out = loaded_sessions
 
         next_chat_state = {"currentChatId": current_chat_id, "messages": messages}
         # Preserve explicit isLoading=False once we have loaded history
@@ -644,6 +766,63 @@ def build_app() -> Dash:
         Input("chat-transcript", "children"),
     )
 
+    # Keep a lightweight per-chat client-side cache to instantly render previously opened chats.
+    # This stores only in the user's browser (localStorage) and is scoped per-user.
+    app.clientside_callback(
+        """
+        function(chatState, cacheData, userData, configData){
+            try {
+                if (!chatState || !chatState.currentChatId || !Array.isArray(chatState.messages)) {
+                    return window.dash_clientside.no_update;
+                }
+                var owner = (userData && userData.user) || null;
+                var cache = cacheData || {};
+                if (!cache.chats || cache.owner !== owner) {
+                    cache = { owner: owner, chats: {} };
+                }
+                var chatId = chatState.currentChatId;
+                var messages = chatState.messages.slice();
+                cache.chats[chatId] = { messages: messages, updatedAt: Date.now() };
+                var TTL_MS = (configData && configData.cacheTtlMs) || (24 * 60 * 60 * 1000); // default 1 day
+                var now = Date.now();
+                try {
+                    // Prune stale entries beyond TTL
+                    Object.keys(cache.chats || {}).forEach(function(k){
+                        try {
+                            var ua = (cache.chats[k] && cache.chats[k].updatedAt) || 0;
+                            if ((now - ua) > TTL_MS) {
+                                delete cache.chats[k];
+                            }
+                        } catch (e) {}
+                    });
+                } catch (e) {}
+                // Cap cache size to the most recent 10 chats
+                try {
+                    var keys = Object.keys(cache.chats || {});
+                    if (keys.length > 12) {
+                        keys.sort(function(a,b){
+                            var ba = (cache.chats[b] && cache.chats[b].updatedAt) || 0;
+                            var aa = (cache.chats[a] && cache.chats[a].updatedAt) || 0;
+                            return ba - aa;
+                        });
+                        for (var i = 10; i < keys.length; i++) {
+                            delete cache.chats[keys[i]];
+                        }
+                    }
+                } catch (e) {}
+                return cache;
+            } catch (e) {
+                return window.dash_clientside.no_update;
+            }
+        }
+        """,
+        Output("chat-cache", "data"),
+        Input("chat-store", "data"),
+        State("chat-cache", "data"),
+        State("user-store", "data"),
+        State("config-store", "data"),
+    )
+
     return app
 
 
@@ -652,7 +831,7 @@ server = app.server
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8050"))
+    port = int(os.getenv("PORT", "8000"))
     app.run_server(host="0.0.0.0", port=port, debug=True)
 
 

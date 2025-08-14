@@ -14,5 +14,6 @@ env:
     value: "Tanner W Adtech DB Access Role"
   - name: "AGENT_ENDPOINT"
     value: "tanner_wendland-default-chat_history_agent"
-
+  - name: "PORT"
+    value: "8000"
 
