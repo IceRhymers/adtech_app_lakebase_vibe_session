@@ -746,24 +746,83 @@ def build_app() -> Dash:
             )
         return items
 
-    # Auto-scroll transcript to bottom whenever transcript content changes
+    # Auto-scroll transcript to bottom only when a thread is loaded AND the user is near the bottom
     app.clientside_callback(
         """
-        function(children){
+        function(children, chatState){
             try {
-                var anchor = document.getElementById('scroll-anchor');
-                if (anchor && anchor.scrollIntoView) {
-                    anchor.scrollIntoView({behavior: 'auto', block: 'end'});
-                } else {
-                    var el = document.getElementById('chat-transcript');
-                    if (el) el.scrollTop = el.scrollHeight;
+                // Only when a chat thread is selected
+                if (!chatState || !chatState.currentChatId) {
+                    return window.dash_clientside.no_update;
                 }
-            } catch (e) {}
-            return 0;
+
+                var el = document.getElementById('chat-transcript');
+                if (!el) {
+                    return window.dash_clientside.no_update;
+                }
+
+                // Reset userScrolled when switching chats
+                try {
+                    var currentId = chatState.currentChatId || '';
+                    if (el.dataset.chatId !== currentId) {
+                        el.dataset.chatId = currentId;
+                        el.dataset.userScrolled = 'false';
+                    }
+                } catch (e) {}
+
+                // Attach a one-time listener to detect manual scrolling intent
+                try {
+                    if (!el.dataset.scrollListenerAttached) {
+                        el.addEventListener('scroll', function(){
+                            try {
+                                var gapNow = el.scrollHeight - el.scrollTop - el.clientHeight;
+                                var atBottom = gapNow < 2;
+                                if (atBottom) {
+                                    el.dataset.userScrolled = 'false';
+                                } else {
+                                    el.dataset.userScrolled = 'true';
+                                }
+                            } catch (e) {}
+                        }, { passive: true });
+                        el.dataset.scrollListenerAttached = 'true';
+                    }
+                } catch (e) {}
+
+                var anchor = document.getElementById('scroll-anchor');
+                var bottomGap = el.scrollHeight - el.scrollTop - el.clientHeight;
+                var userScrolled = el.dataset.userScrolled === 'true';
+
+                // Initial load for selected chat: if at top and content present and no manual scroll yet, force scroll
+                var hasContent = Array.isArray(children) ? children.length > 0 : !!children;
+                if (!userScrolled && hasContent && el.scrollTop <= 1) {
+                    if (anchor && anchor.scrollIntoView) {
+                        anchor.scrollIntoView({behavior: 'auto', block: 'end'});
+                    } else {
+                        el.scrollTop = el.scrollHeight;
+                    }
+                    return 0;
+                }
+
+                // Keep auto-scrolling only when user is near bottom
+                var isNearBottom = bottomGap < 160; // px threshold
+                if (isNearBottom) {
+                    if (anchor && anchor.scrollIntoView) {
+                        anchor.scrollIntoView({behavior: 'auto', block: 'end'});
+                    } else {
+                        el.scrollTop = el.scrollHeight;
+                    }
+                    return 0;
+                }
+
+                return window.dash_clientside.no_update;
+            } catch (e) {
+                return window.dash_clientside.no_update;
+            }
         }
         """,
         Output("scroll-trigger", "data"),
         Input("chat-transcript", "children"),
+        State("chat-store", "data"),
     )
 
     # Keep a lightweight per-chat client-side cache to instantly render previously opened chats.
