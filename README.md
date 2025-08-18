@@ -1,6 +1,6 @@
 # AI Chatbot with Databricks Lakebase and Vector Search
 
-This project provides a sophisticated AI chatbot application built with Streamlit that leverages Databricks Lakebase for data persistence and includes vector search capabilities for intelligent conversation handling. The infrastructure is managed with Terraform, and the app includes data pipelines for chat history management and AI agent functionality.
+This project provides a sophisticated AI chatbot application built with Dash that leverages Databricks Lakebase for data persistence and includes vector search capabilities for intelligent conversation handling. The infrastructure is managed with Terraform, and the app includes a notebook to deploy the AI agent.
 
 ---
 
@@ -123,7 +123,7 @@ env:
 |--------------------|------------------------------------------------------------|-----------------------------------------|----------|
 | `LAKEBASE_DB_NAME` | Name of the Databricks Lakebase Postgres database instance | `tannerw-adtech-db`                     | Yes      |
 | `POSTGRES_GROUP`   | Name of the Databricks group with access to the database   | `Tanner W Adtech DB Access Role`        | No       |
-| `AGENT_ENDPOINT`   | Name of the serving endpoint for the AI agent             | `tanner_wendland-default-chat_history_agent` | No       |
+| `AGENT_ENDPOINT`   | Name of the serving endpoint for the AI agent             | `tanner_wendland-default-chat_history_agent` | Yes       |
 
 Update these values in `app/app.yml` to match your environment.
 
@@ -182,25 +182,28 @@ just run
 ## Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Streamlit App │◄──►│  PostgreSQL DB  │    │ Data Pipelines  │
-│                 │    │   (Lakebase)    │────│  (Notebooks)    │
-│                 │    └─────────────────┘    └─────────────────┘
-│                 │                                     │
-│                 │    ┌─────────────────┐              │
-│                 │◄──►│  AI Agent       │              ▼
-└─────────────────┘    │  Endpoint       │    ┌─────────────────┐
-                       │                 │◄───│ Delta Tables &  │
-                       └─────────────────┘    │ Vector Search   │
-                                              └─────────────────┘
+┌─────────────────────────┐      ┌──────────────────────────────────────┐
+│         Dash App        │◄────►│ Lakebase (PostgreSQL + pgvector)     │
+│  (computes embeddings)  │      │   - app state + vector store         │
+└──────────┬──────────────┘      └──────────────────────────────────────┘
+           │                              ▲
+           │                              │
+           ▼                              │
+┌─────────────────────────┐               │
+│       AI Agent          │◄──────────────┘
+│       Endpoint          │
+└───────────▲─────────────┘
+            │
+┌───────────┴─────────────┐
+│ Notebooks (deploy agent)│
+└─────────────────────────┘
 ```
 
 **Component Interactions:**
-- **Streamlit App** ↔ **PostgreSQL DB**: Stores and retrieves chat sessions and message history
-- **Streamlit App** ↔ **AI Agent Endpoint**: Sends user messages and receives AI responses with vector search context
-- **Data Pipelines** → **PostgreSQL DB**: Reads chat history from PostgreSQL
-- **Data Pipelines** → **Delta Tables & Vector Search**: Transforms and loads chat data for semantic search
-- **AI Agent Endpoint** ← **Vector Search**: Uses vector search to find relevant conversation context for responses
+- **Dash App** ↔ **Lakebase (PostgreSQL + pgvector)**: Stores app state (sessions, messages) and embeddings; computes embeddings in-app and upserts to the pgvector index
+- **Dash App** ↔ **AI Agent Endpoint**: Sends user messages and receives AI responses; both query Lakebase pgvector for context
+- **AI Agent Endpoint** ↔ **Lakebase**: Reads/writes as needed and performs vector search over embeddings stored in Lakebase
+- **Notebooks** → **AI Agent Endpoint**: Used to deploy/update the agent endpoint; not required for app runtime
 
 ## Dependencies
 
