@@ -39,6 +39,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnableLambda
 
 # Enable MLflow Tracing for LangChain
+mlflow.autolog()
 mlflow.langchain.autolog()
 
 # Load chain configuration provided at logging/deployment time.
@@ -198,24 +199,23 @@ def pg_vector_similarity_search(
 
     passages = [f"Passage: {r.message_content}" for r in rows]
     return "\n".join(passages)
-  
+
 
 def create_context_aware_vector_search_tool(state):
   """Create a vector search tool that has access to user context from state"""
-  
+
   def filtered_vector_search(query: str) -> str:
       # Extract user context from state
       user_context = state.get("user_context", {})
       filters = user_context.get("filters", {})
-      
+
       # Use your existing pg_vector_similarity_search with filters
       return pg_vector_similarity_search(
-          embeddings=embeddings, 
-          query=query, 
-          k=retriever_config["parameters"]["k"], 
+          query_text=query, 
+          k=model_config.get('k'), 
           filters=filters
       )
-  
+
   return Tool(
       name="search_chat_history",
       description="Retrieve chat history from Postgres (pgvector) for the current user; use only if the immediate conversation context is insufficient. THe input to this function should be the user message.",
@@ -268,7 +268,7 @@ def supervisor_agent(state):
     count = state.get("iteration_count", 0) + 1
     if count > MAX_ITERATIONS:
         return FINISH
-    
+
     class nextNode(BaseModel):
         next_node: Literal[tuple(options)]
 
@@ -277,7 +277,7 @@ def supervisor_agent(state):
     )
     supervisor_chain = preprocessor | model.with_structured_output(nextNode)
     next_node = supervisor_chain.invoke(state).next_node
-    
+
     # if routed back to the same node, exit the loop
     if state.get("next_node") == next_node:
         return FINISH
@@ -315,20 +315,20 @@ def final_answer(state):
 
 def agent_node_with_context(state, agent, name):
     """Enhanced agent node that injects context-aware tools"""
-    
+
     # Create the shared vector search tool with current state context
     vector_search_tool = create_context_aware_vector_search_tool(state)
-    
+
     if name == "Genie":
         # Genie already has its tools, just add vector search
         enhanced_agent = agent  # Genie agent already configured
         # Note: GenieAgent might need special handling - see option below
-        
+
     elif name == "Coder" or name == "General":
         # Add vector search tool to Coder's existing UC tools
         enhanced_tools = tools + [vector_search_tool]  # tools is your UC toolkit
         enhanced_agent = create_react_agent(model, tools=[vector_search_tool])
-        
+
     # Execute with enhanced agent
     result = enhanced_agent.invoke(state)
     return {
@@ -397,7 +397,7 @@ class LangGraphChatAgent(ChatAgent):
         user_context = {}
         if custom_inputs and "filters" in custom_inputs:
             user_context["filters"] = custom_inputs["filters"]
-        
+
         request = {
             "messages": [m.model_dump_compat(exclude_none=True) for m in messages],
             "user_context": user_context  # Inject user context into state
