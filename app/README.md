@@ -77,3 +77,16 @@ The app leverages:
 - Uses Databricks workspace authentication
 - Secure database connections with SSL
 - Input validation and duplicate key prevention
+
+## LangGraph response support
+
+Some Databricks Serving endpoints (including LangGraph) return structured outputs instead of a single string. The app normalizes these into plain text so the UI and history saving work unchanged.
+
+Handled shapes include:
+- `{ "choices": [{ "message": { "content": "..." } }] }`
+- `{ "output_text": "..." }` or `{ "text": "..." }`
+- `{ "messages": [{ "role": "assistant", "content": "..." }, ...] }` (assistant contents joined)
+- `[ { messages: [...] }, ... ]` and other list variants (parts joined with blank lines)
+
+Configuration:
+- `AGENT_ENDPOINT` must point to your Databricks serving endpoint name.

@@ -23,7 +23,14 @@ class StreamingBuffer:
         if not text_chunk:
             return
         with self._lock:
-            self._chunks.append(text_chunk)
+            # Coerce any non-string content to string defensively
+            try:
+                if not isinstance(text_chunk, str):
+                    text_chunk = str(text_chunk)
+            except Exception:
+                text_chunk = ""
+            if text_chunk:
+                self._chunks.append(text_chunk)
 
     def mark_done(self) -> None:
         with self._lock:

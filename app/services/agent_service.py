@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
@@ -15,6 +15,99 @@ class AgentService:
 
     def __init__(self, client: WorkspaceClient | None = None):
         self.client = client or get_workspace_client()
+
+    def _normalize_response_to_text(self, response: Any) -> str:
+        """
+        Normalize various Databricks Serving response shapes (Claude/chat, LangGraph, raw strings)
+        into a single plain text string suitable for display and persistence.
+
+        Known shapes handled:
+        - str -> returned as-is
+        - { choices: [{ message: { content } } ] } -> extract content
+        - { output_text | text } -> extract as content
+        - { messages: [ { role, content, ... } ] } -> join assistant contents
+        - [ { messages: [...] }, ... ] -> join assistant contents across items
+        - [ str | {text}|{output_text}|{choices}] -> join extracted with double newlines
+        Fallback: JSON stringify.
+        """
+        try:
+            # 1) Simple string
+            if isinstance(response, str):
+                return response
+
+            # 2) choices shape
+            if isinstance(response, dict):
+                if "choices" in response and isinstance(response["choices"], list) and response["choices"]:
+                    choice0 = response["choices"][0]
+                    try:
+                        return str(choice0["message"]["content"])  # type: ignore[index]
+                    except Exception:
+                        pass
+                # explicit text fields
+                if isinstance(response.get("output_text"), str):
+                    return str(response["output_text"])  # type: ignore[index]
+                if isinstance(response.get("text"), str):
+                    return str(response["text"])  # type: ignore[index]
+                # messages array
+                msgs = response.get("messages")
+                if isinstance(msgs, list) and msgs:
+                    assistant_texts: List[str] = []
+                    for m in msgs:
+                        if not isinstance(m, dict):
+                            continue
+                        role = m.get("role")
+                        content = m.get("content")
+                        if role == "assistant" and isinstance(content, str) and content.strip():
+                            assistant_texts.append(content)
+                    if assistant_texts:
+                        return "\n\n".join(assistant_texts)
+
+            # 3) top-level list (e.g., LangGraph batches)
+            if isinstance(response, list) and response:
+                collected: List[str] = []
+                for item in response:
+                    if isinstance(item, str):
+                        if item.strip():
+                            collected.append(item)
+                        continue
+                    if isinstance(item, dict):
+                        # nested messages
+                        msgs = item.get("messages")
+                        if isinstance(msgs, list):
+                            assistant_texts: List[str] = []
+                            for m in msgs:
+                                if not isinstance(m, dict):
+                                    continue
+                                role = m.get("role")
+                                content = m.get("content")
+                                if role == "assistant" and isinstance(content, str) and content.strip():
+                                    assistant_texts.append(content)
+                            if assistant_texts:
+                                collected.append("\n\n".join(assistant_texts))
+                                continue
+                        # explicit fields
+                        if isinstance(item.get("output_text"), str) and item["output_text"].strip():
+                            collected.append(item["output_text"])  # type: ignore[index]
+                            continue
+                        if isinstance(item.get("text"), str) and item["text"].strip():
+                            collected.append(item["text"])  # type: ignore[index]
+                            continue
+                        if "choices" in item and isinstance(item["choices"], list) and item["choices"]:
+                            try:
+                                collected.append(str(item["choices"][0]["message"]["content"]))  # type: ignore[index]
+                                continue
+                            except Exception:
+                                pass
+                if collected:
+                    return "\n\n".join(collected)
+
+            # 4) last resort: stringify
+            return json.dumps(response)
+        except Exception:
+            try:
+                return json.dumps(response)
+            except Exception:
+                return ""
 
     def generate_bot_response(self, current_user: str, messages: List[ChatMessage]) -> str:
         try:
@@ -52,7 +145,6 @@ class AgentService:
                 })
 
             payload = {
-                "system": system_prompt,
                 "messages": message_dicts,
                 "custom_inputs": {
                     "filters": {
@@ -70,12 +162,8 @@ class AgentService:
                 data=payload_json,
             )
 
-            # Normalize common response shapes
-            if isinstance(response, list) and len(response) > 0:
-                return response[0]
-            if isinstance(response, dict) and "choices" in response:
-                return response["choices"][0]["message"]["content"]
-            return str(response)
+            # Normalize to text across all variants (Claude/chat, LangGraph, etc.)
+            return self._normalize_response_to_text(response)
         except Exception as e:
             return f"Error calling model serving endpoint: {str(e)}"
 

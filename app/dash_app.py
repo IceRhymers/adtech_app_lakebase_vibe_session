@@ -546,6 +546,13 @@ def build_app() -> Dash:
         prevent_initial_call=False,
     )
     def toggle_delete_loading(n_clicks: Optional[int], is_open: bool):
+        # When the modal has just been opened, always reset the button state
+        try:
+            if ctx.triggered_id == "delete-confirm-modal" and is_open:
+                return "Delete", False, False
+        except Exception:
+            pass
+
         # When modal is open and user has clicked delete at least once, show loading state
         if is_open and (n_clicks or 0) > 0:
             return "Deleting...", True, True
@@ -692,13 +699,13 @@ def build_app() -> Dash:
             return no_update, no_update, no_update, next_interval_ms
 
         # Only update sessions-store when we actually fetched new sessions.
-        # Merge with existing to preserve optimistic items (e.g., just-created chats)
+        # Make loaded sessions authoritative to avoid re-adding deleted items from stale state
         sessions_out = no_update
         if loaded_sessions is not None:
             try:
                 existing_by_id = {s.get("id"): s for s in (sessions_data or []) if s and s.get("id")}
                 loaded_by_id = {s.get("id"): s for s in (loaded_sessions or []) if s and s.get("id")}
-                # Start with loaded (authoritative), then add any existing not in loaded
+                # Start with loaded (authoritative)
                 merged: List[Dict[str, Any]] = []
                 # Preserve loaded order
                 for s in loaded_sessions:
@@ -707,9 +714,6 @@ def build_app() -> Dash:
                     if sid in existing_by_id and existing_by_id[sid].get("title") and not s.get("title"):
                         merged.append({**s, "title": existing_by_id[sid].get("title")})
                     else:
-                        merged.append(s)
-                for sid, s in existing_by_id.items():
-                    if sid not in loaded_by_id:
                         merged.append(s)
                 sessions_out = merged
             except Exception:
