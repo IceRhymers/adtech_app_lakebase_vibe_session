@@ -8,12 +8,13 @@ terraform {
 }
 
 provider "databricks" {
-  profile = "DEFAULT"
+  profile = var.databricks_cli_profile
 }
 
-variable "manage_principals" {
-  type  = list(string)
-  default = []
+variable "databricks_cli_profile" {
+  type        = string
+  description = "Databricks CLI profile to use"
+  default     = "DEFAULT"
 }
 
 variable "database_instance_name" {
@@ -57,6 +58,12 @@ variable "secret_value" {
 resource "databricks_database_instance" "vibe_session_db" {
   name     = var.database_instance_name
   capacity = "CU_1"
+  
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
+  }
 }
 
 output "database_instance_name" {
@@ -101,10 +108,14 @@ output "postgres_role_group_name" {
   description = "The display name of the Databricks group used for Postgres DB access."
 }
 
+# Create the secret scope if it doesn't exist
+resource "databricks_secret_scope" "this" {
+  name = var.secret_scope_name
+}
 
 # Create the secret in the provided scope
 resource "databricks_secret" "this" {
-  scope        = var.secret_scope_name
+  scope        = databricks_secret_scope.this.name
   key          = var.secret_name
   string_value = var.secret_value
 }

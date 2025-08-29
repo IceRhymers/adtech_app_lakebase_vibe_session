@@ -144,14 +144,28 @@ class AgentService:
                     "content": msg.content,
                 })
 
-            payload = {
+            # Get configurable k value for chat history retrieval
+            agent_chat_k_str = os.getenv("AGENT_CHAT_K", "5")
+            try:
+                agent_chat_k = int(agent_chat_k_str)
+            except ValueError:
+                agent_chat_k = 5
+            if agent_chat_k <= 0:
+                agent_chat_k = 5
+
+            # Agent endpoint expects List[ChatRequest] wrapped in Databricks serving format
+            request_data = [{
                 "messages": message_dicts,
                 "custom_inputs": {
                     "filters": {
                         "user_name": current_user,
-                    }
+                    },
+                    "k": agent_chat_k,
                 },
-            }
+            }]
+            
+            # Wrap in Databricks serving endpoint format
+            payload = {"inputs": request_data}
 
             payload_json = json.dumps(payload)
 

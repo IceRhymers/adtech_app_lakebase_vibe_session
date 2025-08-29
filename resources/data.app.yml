@@ -1,4 +1,13 @@
 resources:
+
+  # database_instances:
+  #   tannerw_adtech_db:
+  #     name: "tannerw-adtech-db"
+  #     capacity: "CU_1"
+  #     permissions:
+  #       - group_name: "Tanner W Adtech DB Access Role"
+  #         level: "CAN_MANAGE"
+
   apps:
     data_app:
       name: "tannerw-adtech-demo"

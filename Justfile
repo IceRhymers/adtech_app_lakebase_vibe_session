@@ -1,3 +1,6 @@
+# Configuration variables
+BACKEND_DB_INSTANCE := "tanner-wendland-workspace-pg"
+
 # Create a virtual environment for the app
 venv:
     # Check if 'uv' is installed
@@ -12,9 +15,30 @@ venv:
     # Install requirements
     uv pip install -r app/requirements.txt --python app/.venv/bin/python
 
-# Initialize terraform for lakebase deployment
+# Set up environment variables for Terraform PostgreSQL backend and initialize
 terraform-init:
-    cd terraform && terraform init
+    #!/bin/bash
+    set -euo pipefail
+    echo "Setting up Terraform PostgreSQL backend and initializing..."
+    
+    # Get the current user
+    USERNAME=$(databricks current-user me --output json | jq -r '.userName')
+    echo "Username: $USERNAME"
+    
+    # Get the database host
+    HOST=$(databricks database get-database-instance {{BACKEND_DB_INSTANCE}} --output json | jq -r '.read_write_dns')
+    echo "Host: $HOST"
+    
+    # Generate database credentials and get password
+    REQUEST_ID=$(date +%s)
+    PASSWORD=$(databricks database generate-database-credential --request-id $REQUEST_ID --json "{\"instance_names\": [\"{{BACKEND_DB_INSTANCE}}\"]}" | jq -r '.token')
+    echo "Password retrieved for request ID: $REQUEST_ID"
+    
+    # Build PostgreSQL connection string
+    export PG_CONN_STR="postgres://$USERNAME:$PASSWORD@$HOST:5432/terraform_state?sslmode=verify-full"
+    echo "Connection string configured"
+
+    cd terraform && terraform init -reconfigure -backend-config="conn_str=$PG_CONN_STR"
 
 # Create terraform.tfvars file to override default values
 terraform-init-vars:
@@ -71,8 +95,28 @@ migrations-upgrade: wait-for-database
     cd app && .venv/bin/alembic upgrade head
 
 # Generate a JDBC URL for use in a SQL Workbench, using the same configuration as Alembic.
-jdbc-url:
-    cd app && .venv/bin/python scripts/get_jdbc_url.py
+# Usage: just jdbc-url [INSTANCE_NAME] [DATABASE_NAME] [PROFILE]
+jdbc-url instance_name="" database_name="" profile="":
+    #!/bin/bash
+    cd app
+    
+    # Build command arguments
+    CMD=(.venv/bin/python scripts/get_jdbc_url.py)
+    
+    if [ -n "{{instance_name}}" ]; then
+        CMD+=(--instance-name "{{instance_name}}")
+    fi
+    
+    if [ -n "{{database_name}}" ]; then
+        CMD+=(--database-name "{{database_name}}")
+    fi
+    
+    if [ -n "{{profile}}" ]; then
+        CMD+=(--profile "{{profile}}")
+    fi
+    
+    echo "DEBUG: Running command: ${CMD[@]}" >&2
+    "${CMD[@]}"
 
 # Run the app locally
 run: venv
@@ -123,9 +167,13 @@ app-deploy: bundle-deploy
     echo "Deploying app: $APP_NAME" && \
     databricks apps deploy "$APP_NAME" --source-code-path "$WORKSPACE_PATH/app"
 
-# Full end to end deployment.
+# Full end to end deployment of the app
 full-deploy: terraform-full bundle-deploy venv migrations-upgrade app-permissions app-start app-deploy
     echo "Full deploy complete"
+
+# Full end to end deployment of the agent
+full-deploy-agent: terraform-full bundle-deploy venv migrations-upgrade agent-deploy app-permissions app-start app-deploy
+    echo "Full with agent deploy complete"
 
 # Clean up the virtual environment
 clean:

@@ -1,6 +1,8 @@
 from databricks.sdk import WorkspaceClient
 import uuid
 import os
+import sys
+import logging
 from typing import Optional
 from sqlalchemy import create_engine
 
@@ -65,6 +67,10 @@ def get_jdbc_url(
     Returns:
         str: JDBC-compatible PostgreSQL connection string.
     """
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Attempting to get database instance: {db_name}")
+    print(f"DEBUG: Attempting to get database instance: {db_name}", file=sys.stderr)
+    
     database = client.database.get_database_instance(db_name)
     credentials = client.database.generate_database_credential(
         instance_names=[db_name],

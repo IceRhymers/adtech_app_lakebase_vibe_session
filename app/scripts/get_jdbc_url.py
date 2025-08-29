@@ -8,6 +8,7 @@ Usage: python get_jdbc_url.py [--profile PROFILE]
 import sys
 import argparse
 import configparser
+import logging
 from pathlib import Path
 
 # Add the app directory to Python path so we can import lakebase
@@ -50,15 +51,40 @@ def main():
     parser = argparse.ArgumentParser(description='Generate JDBC URL for Lakebase database using alembic.ini config')
     parser.add_argument('--profile', default=None,
                        help='Override Databricks profile to use (default: from alembic.ini or DEFAULT)')
+    parser.add_argument('--instance-name', default=None,
+                       help='Override database instance name (default: from alembic.ini)')
+    parser.add_argument('--database-name', default=None,
+                       help='Override database name (default: from alembic.ini or databricks_postgres)')
+    parser.add_argument('--debug', action='store_true',
+                       help='Enable debug logging')
     
     args = parser.parse_args()
+    
+    # Configure logging to stderr
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG, format='%(levelname)s: %(message)s', stream=sys.stderr)
+    else:
+        logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s', stream=sys.stderr)
+    
+    logger = logging.getLogger(__name__)
+    
+    # Always show what arguments we received for debugging
+    print(f"DEBUG: Starting JDBC URL generation with args: {args}", file=sys.stderr)
+    print(f"DEBUG: Raw sys.argv: {sys.argv}", file=sys.stderr)
     
     try:
         # Read configuration from alembic.ini
         config = read_alembic_config()
+        logger.debug(f"Config from alembic.ini: {config}")
         
-        # Use command line profile if provided, otherwise use config profile
-        profile = args.profile or config['profile_name']
+        # Use command line arguments if provided, otherwise use config values
+        profile = args.profile if args.profile is not None else config['profile_name']
+        instance_name = args.instance_name if args.instance_name is not None else config['instance_name']
+        database_name = args.database_name if args.database_name is not None else config['database_name']
+        
+        logger.debug(f"Using profile: {profile}")
+        logger.debug(f"Using instance_name: {instance_name}")
+        logger.debug(f"Using database_name: {database_name}")
         
         # Create workspace client
         if profile:
@@ -66,14 +92,20 @@ def main():
         else:
             client = WorkspaceClient()
         
-        # Generate JDBC URL using config from alembic.ini
-        jdbc_url = get_jdbc_url(client, config['instance_name'], config['database_name'])
+        logger.debug(f"Created workspace client with profile: {profile}")
+        logger.debug(f"Attempting to get database instance: {instance_name}")
+        
+        # Generate JDBC URL using provided or config values
+        jdbc_url = get_jdbc_url(client, instance_name, database_name)
         
         # Print the JDBC URL
         print(jdbc_url)
         
     except Exception as e:
+        import traceback
         print(f"Error generating JDBC URL: {e}", file=sys.stderr)
+        print("\nFull traceback:", file=sys.stderr)
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":

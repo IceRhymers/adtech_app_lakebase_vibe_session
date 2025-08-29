@@ -7,7 +7,7 @@ resources:
       schedule:
         quartz_cron_expression: '0 0/30 * * * ?'  # Run every 30 minutes
         timezone_id: UTC
-        pause_status: UNPAUSED
+        pause_status: PAUSED
 
       #email_notifications:
       #  on_failure:
@@ -40,9 +40,9 @@ resources:
       tasks:
         - task_key: adtech_chat_history_agent
           notebook_task:
-            notebook_path: ../data_pipelines/src/02.1-chat-history-agent-pg.ipynb
+            notebook_path: ../data_pipelines/src/02.2-chat-history-agent-pg-genie.ipynb
             base_parameters:
-              target_catalog: tanner_wendland
+              target_catalog: tanner_wendland_workspace
               target_schema: default
               llm_model_serving_endpoint_name: databricks-claude-3-7-sonnet
               embedding_model: databricks-gte-large-en
@@ -50,3 +50,4 @@ resources:
               postgres_database_name: databricks_postgres
               secret_scope: field-eng
               secret_key: app-secret
+              genie_space_id: 01f084fd30641928ab0120e6102bd57a
