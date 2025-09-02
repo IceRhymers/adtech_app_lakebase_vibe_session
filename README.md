@@ -308,7 +308,8 @@ These are orchestrated via Databricks Jobs defined in `resources/adtech_vector_c
 - Use `just --list` to see all available commands with descriptions
 
 ---
-
-## License
-
-MIT 
+=======
+## More Information
+- For detailed app usage, see [`app/README.md`](app/README.md)
+- For migration and database management, use the Justfile commands (e.g., `just migrations-generate`, `just migrations-upgrade`)
+- For deployment, see the Justfile for `bundle-deploy`, `app-deploy`, and related commands
