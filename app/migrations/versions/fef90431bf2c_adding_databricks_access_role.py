@@ -20,15 +20,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS databricks_auth;")
-    op.execute("SELECT databricks_create_role('Vibe Session DB Access Role','GROUP');")
-    op.execute('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "Vibe Session DB Access Role";')
-    op.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "Vibe Session DB Access Role";')
+    op.execute("SELECT databricks_create_role('Tanner W Adtech DB Access Role','GROUP');")
+    op.execute('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "Tanner W Adtech DB Access Role";')
+    op.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "Tanner W Adtech DB Access Role";')
+    op.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "Tanner W Adtech DB Access Role";')
     pass
 
 
 def downgrade() -> None:
-    op.execute('REVOKE SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public FROM "Vibe Session DB Access Role";')
-    op.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM "Vibe Session DB Access Role";')
-    op.execute('DROP ROLE IF EXISTS "Vibe Session DB Access Role";')
+    op.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE USAGE, SELECT ON ALL SEQUENCES FROM "Tanner W Adtech DB Access Role";')
+    op.execute('REVOKE SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public FROM "Tanner W Adtech DB Access Role";')
+    op.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM "Tanner W Adtech DB Access Role";')
+    op.execute('DROP ROLE IF EXISTS "Tanner W Adtech DB Access Role";')
     op.execute("DROP EXTENSION IF EXISTS databricks_auth;")   
     pass

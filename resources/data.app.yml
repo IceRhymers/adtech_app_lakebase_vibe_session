@@ -1,7 +1,7 @@
 resources:
   apps:
     data_app:
-      name: "adtech-app-vibe-session"
+      name: "tannerw-adtech-demo"
       source_code_path: ../app
       description: "A Streamlit app that uses lakebase."
 

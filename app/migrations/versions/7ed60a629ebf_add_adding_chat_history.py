@@ -1,8 +1,8 @@
-"""Add config_kv table for key-value configuration storage
+"""Add adding chat history
 
-Revision ID: bf40070c684e
+Revision ID: 7ed60a629ebf
 Revises: fef90431bf2c
-Create Date: 2025-07-25 10:17:52.254128
+Create Date: 2025-07-30 16:35:44.451979
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'bf40070c684e'
+revision: str = '7ed60a629ebf'
 down_revision: Union[str, None] = 'fef90431bf2c'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

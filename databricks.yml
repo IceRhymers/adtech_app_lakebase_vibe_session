@@ -1,7 +1,7 @@
 # This is a Databricks asset bundle definition for adtech_databricks_lakebase_app.
 # See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
 bundle:
-  name: adtech_app_lakebase_vibe_session
+  name: tannerw_adtech_demo
 
 include:
   - resources/*.yml

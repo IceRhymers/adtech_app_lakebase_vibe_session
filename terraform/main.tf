@@ -22,10 +22,36 @@ variable "database_instance_name" {
   default     = "vibe-session-db"
 }
 
+variable "database_catalog_name" {
+  type        = string
+  description = "Name of the Databricks database catalog"
+  default     = "vibe_session_postgres"
+}
+
 variable "database_group_name" {
   type        = string
   description = "Display name for the Databricks group with database access"
   default     = "Vibe Session DB Access Role"
+}
+
+# Secret management inputs
+variable "secret_scope_name" {
+  type        = string
+  description = "Databricks secret scope to use or create if missing"
+  default     = "field-eng"
+}
+
+variable "secret_name" {
+  type        = string
+  description = "Name (key) of the Databricks secret to create"
+  default     = "app-secret"
+}
+
+variable "secret_value" {
+  type        = string
+  description = "Value of the Databricks secret to create; if empty, secret is not created"
+  default     = "fake-token"
+  sensitive   = true
 }
 
 resource "databricks_database_instance" "vibe_session_db" {
@@ -74,3 +100,22 @@ output "postgres_role_group_name" {
   value       = databricks_group.postgres_role.display_name
   description = "The display name of the Databricks group used for Postgres DB access."
 }
+
+
+# Create the secret in the provided scope
+resource "databricks_secret" "this" {
+  scope        = var.secret_scope_name
+  key          = var.secret_name
+  string_value = var.secret_value
+}
+
+output "secret_scope_used" {
+  value       = var.secret_scope_name
+  description = "Secret scope used (created if it did not exist)."
+}
+
+output "secret_name_created" {
+  value       = var.secret_name
+  description = "Secret name (key) created when a non-empty value is provided."
+}
+
