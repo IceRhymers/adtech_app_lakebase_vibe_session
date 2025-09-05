@@ -17,6 +17,7 @@ from services.agent_service import AgentService
 from services.task_queue import (
     create_message_id,
     submit_generation,
+    submit_streaming_generation,
     submit_save,
     get_generation_buffer,
     get_save_status,
@@ -445,8 +446,8 @@ def build_app() -> Dash:
         submit_save(user_message_id, save_user)
         logger.debug("send_message: queued save user_message_id=%s order=%s", user_message_id, next_order)
 
-        # Background generation
-        def generate():
+        # Background streaming generation
+        def generate_stream():
             # Build agent input from transcript including the new user msg
             from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
             history_msgs = []
@@ -454,10 +455,10 @@ def build_app() -> Dash:
                 role = ChatMessageRole.USER if m["role"] == "user" else ChatMessageRole.ASSISTANT
                 history_msgs.append(ChatMessage(role=role, content=m["content"]))
             user_name_local = (user_data or {}).get("user") or get_current_user_name()
-            return agent_service.generate_bot_response(user_name_local, history_msgs)
+            return agent_service.generate_bot_response_stream(user_name_local, history_msgs)
 
-        # Databricks endpoint returns the full response; disable simulated streaming
-        submit_generation(assistant_message_id, generate, simulate_stream=False)
+        # Use streaming generation
+        submit_streaming_generation(assistant_message_id, generate_stream)
         logger.debug("send_message: queued generation assistant_message_id=%s", assistant_message_id)
 
         new_state = {"currentChatId": chat_id, "messages": messages}

@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Generator
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
@@ -155,8 +155,8 @@ class AgentService:
             if agent_chat_k <= 0:
                 agent_chat_k = 5
 
-            # Agent endpoint expects List[ChatRequest] wrapped in Databricks serving format
-            request_data = {
+            # Agent endpoint expects the request data directly (not wrapped in "inputs")
+            payload = {
                 "messages": message_dicts,
                 "custom_inputs": {
                     "filters": {
@@ -165,9 +165,6 @@ class AgentService:
                     "k": agent_chat_k,
                 },
             }
-            
-            # Wrap in Databricks serving endpoint format
-            payload = {"inputs": request_data}
 
             payload_json = json.dumps(payload)
             logger.debug(f"Payload: {payload_json}")
@@ -179,14 +176,104 @@ class AgentService:
                 data=payload_json,
             )
 
-            open_ai = self.client.serving_endpoints.get_open_ai_client()
-
-            if response.status_code != 200:
-                logger.error(f"Error calling model serving endpoint: {response.status_code} {response.text}")
-
             # Normalize to text across all variants (Claude/chat, LangGraph, etc.)
             return self._normalize_response_to_text(response)
         except Exception as e:
             return f"Error calling model serving endpoint: {str(e)}"
+
+    def generate_bot_response_stream(self, current_user: str, messages: List[ChatMessage]) -> Generator[str, None, None]:
+        """
+        Generate bot response using our agent's predict_stream method via direct API call.
+        Yields chunks of text as they arrive from the model.
+        """
+        try:
+            agent_endpoint = os.getenv("AGENT_ENDPOINT")
+            if not agent_endpoint:
+                yield "Error: AGENT_ENDPOINT environment variable not configured."
+                return
+
+            max_context_messages_str = os.getenv("CHAT_CONTEXT_LIMIT", "5")
+            try:
+                max_context_messages = int(max_context_messages_str)
+            except ValueError:
+                max_context_messages = 5
+            if max_context_messages <= 0:
+                max_context_messages = 5
+
+            limited_messages = messages[-max_context_messages:] if messages else []
+
+            # Build messages list compatible with OpenAI chat API (include system prompt)
+            system_prompt = (
+                """
+        You are a helpful assistant that can answer questions and help with tasks, you are also able to search the chat history for relevant information.
+        If the user asks a question that is not related to the chat history, you shouldn't mention you couldn't find anything related to the question.
+        """
+            ).strip()
+
+            chat_messages: List[Dict[str, str]] = []
+            chat_messages.append({"role": "system", "content": system_prompt})
+            for msg in limited_messages:
+                if not msg.content or not str(msg.content).strip():
+                    continue
+                role_value = "user" if msg.role == ChatMessageRole.USER else "assistant"
+                chat_messages.append({
+                    "role": role_value,
+                    "content": msg.content,
+                })
+
+            # Get configurable k value for chat history retrieval
+            agent_chat_k_str = os.getenv("AGENT_CHAT_K", "5")
+            try:
+                agent_chat_k = int(agent_chat_k_str)
+            except ValueError:
+                agent_chat_k = 5
+            if agent_chat_k <= 0:
+                agent_chat_k = 5
+
+            # Use Databricks-configured OpenAI client for true streaming
+            oai_client = self.client.serving_endpoints.get_open_ai_client()
+
+            stream = oai_client.chat.completions.create(
+                model=agent_endpoint,
+                messages=chat_messages,
+                stream=True,
+                extra_body={
+                    "custom_inputs": {
+                        "filters": {"user_name": current_user},
+                        "k": agent_chat_k,
+                    }
+                },
+            )
+
+            for event in stream:
+                chunk = None
+                # Standard OpenAI shape
+                try:
+                    if getattr(event, "choices", None):
+                        choice0 = event.choices[0]
+                        # dataclasses from openai lib expose .delta.content
+                        delta_obj = getattr(choice0, "delta", None)
+                        if delta_obj is not None:
+                            chunk = getattr(delta_obj, "content", None)
+                except Exception:
+                    pass
+
+                # Databricks variant: top-level delta dict with content
+                if chunk is None:
+                    try:
+                        delta_top = getattr(event, "delta", None)
+                        if isinstance(delta_top, dict):
+                            maybe = delta_top.get("content")
+                            if isinstance(maybe, str) and maybe:
+                                chunk = maybe
+                    except Exception:
+                        pass
+
+                if chunk:
+                    yield chunk
+                    
+        except Exception as e:
+            logger.exception("Error in streaming bot response")
+            yield f"Error calling model serving endpoint: {str(e)}"
 
 

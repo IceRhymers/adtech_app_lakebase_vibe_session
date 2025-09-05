@@ -4,7 +4,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Generator
 
 
 class StreamingBuffer:
@@ -117,6 +117,37 @@ def submit_generation(message_id: str, generate_fn: Callable[[], str], simulate_
         except Exception as gen_err:
             buffer.mark_error(str(gen_err))
             logger.exception(f"submit_generation.run: error message_id={message_id}: {gen_err}")
+
+    _executor.submit(_run)
+
+
+def submit_streaming_generation(message_id: str, stream_generator_fn: Callable[[], Generator[str, None, None]]) -> None:
+    """
+    Submit a real streaming generation job. Takes a function that returns a generator
+    that yields text chunks as they arrive from the model.
+    """
+    buffer = StreamingBuffer()
+    with _registry_lock:
+        _generations[message_id] = buffer
+
+    logger.debug(f"submit_streaming_generation: queued message_id={message_id}")
+
+    def _run() -> None:
+        try:
+            logger.debug(f"submit_streaming_generation.run: start message_id={message_id}")
+            stream_generator = stream_generator_fn()
+            chunk_count = 0
+            
+            for chunk in stream_generator:
+                if chunk:  # Only append non-empty chunks
+                    buffer.append(chunk)
+                    chunk_count += 1
+                    
+            buffer.mark_done()
+            logger.debug(f"submit_streaming_generation.run: done message_id={message_id}, chunks={chunk_count}, total_len={buffer.length()}")
+        except Exception as gen_err:
+            buffer.mark_error(str(gen_err))
+            logger.exception(f"submit_streaming_generation.run: error message_id={message_id}: {gen_err}")
 
     _executor.submit(_run)
 
