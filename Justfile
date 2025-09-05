@@ -1,5 +1,6 @@
 # Configuration variables
 BACKEND_DB_INSTANCE := "tanner-wendland-workspace-pg"
+BACKEND_DB_PROFILE := "iceberg"
 
 # Create a virtual environment for the app
 venv:
@@ -22,16 +23,16 @@ terraform-init:
     echo "Setting up Terraform PostgreSQL backend and initializing..."
     
     # Get the current user
-    USERNAME=$(databricks current-user me --output json | jq -r '.userName')
+    USERNAME=$(databricks --profile {{BACKEND_DB_PROFILE}} current-user me --output json | jq -r '.userName')
     echo "Username: $USERNAME"
     
     # Get the database host
-    HOST=$(databricks database get-database-instance {{BACKEND_DB_INSTANCE}} --output json | jq -r '.read_write_dns')
+    HOST=$(databricks --profile {{BACKEND_DB_PROFILE}} database get-database-instance {{BACKEND_DB_INSTANCE}} --output json | jq -r '.read_write_dns')
     echo "Host: $HOST"
     
     # Generate database credentials and get password
     REQUEST_ID=$(date +%s)
-    PASSWORD=$(databricks database generate-database-credential --request-id $REQUEST_ID --json "{\"instance_names\": [\"{{BACKEND_DB_INSTANCE}}\"]}" | jq -r '.token')
+    PASSWORD=$(databricks --profile {{BACKEND_DB_PROFILE}} database generate-database-credential --request-id $REQUEST_ID --json "{\"instance_names\": [\"{{BACKEND_DB_INSTANCE}}\"]}" | jq -r '.token')
     echo "Password retrieved for request ID: $REQUEST_ID"
     
     # Build PostgreSQL connection string

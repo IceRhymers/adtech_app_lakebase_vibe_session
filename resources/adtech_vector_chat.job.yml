@@ -48,6 +48,6 @@ resources:
               embedding_model: databricks-gte-large-en
               database_instance_name: tannerw-adtech-db
               postgres_database_name: databricks_postgres
-              secret_scope: field-eng
+              secret_scope: adtech_demo
               secret_key: app-secret
-              genie_space_id: 01f084fd30641928ab0120e6102bd57a
+              genie_space_id: 01efcca6fdc712d7be87a40ad4a2e33e

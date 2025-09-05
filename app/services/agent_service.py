@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from typing import Any, Dict, List, Optional
 
 from databricks.sdk import WorkspaceClient
@@ -7,6 +8,7 @@ from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 
 from databricks_utils import get_workspace_client
 
+logger = logging.getLogger(__name__)
 
 class AgentService:
     """
@@ -154,7 +156,7 @@ class AgentService:
                 agent_chat_k = 5
 
             # Agent endpoint expects List[ChatRequest] wrapped in Databricks serving format
-            request_data = [{
+            request_data = {
                 "messages": message_dicts,
                 "custom_inputs": {
                     "filters": {
@@ -162,12 +164,13 @@ class AgentService:
                     },
                     "k": agent_chat_k,
                 },
-            }]
+            }
             
             # Wrap in Databricks serving endpoint format
             payload = {"inputs": request_data}
 
             payload_json = json.dumps(payload)
+            logger.debug(f"Payload: {payload_json}")
 
             response = self.client.api_client.do(
                 method="POST",
@@ -175,6 +178,11 @@ class AgentService:
                 headers={"Content-Type": "application/json"},
                 data=payload_json,
             )
+
+            open_ai = self.client.serving_endpoints.get_open_ai_client()
+
+            if response.status_code != 200:
+                logger.error(f"Error calling model serving endpoint: {response.status_code} {response.text}")
 
             # Normalize to text across all variants (Claude/chat, LangGraph, etc.)
             return self._normalize_response_to_text(response)

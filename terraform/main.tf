@@ -7,9 +7,8 @@ terraform {
   }
 }
 
-provider "databricks" {
-  profile = var.databricks_cli_profile
-}
+// Use the default configuration provider to let users control the profile
+provider "databricks" {}
 
 variable "databricks_cli_profile" {
   type        = string
@@ -58,12 +57,6 @@ variable "secret_value" {
 resource "databricks_database_instance" "vibe_session_db" {
   name     = var.database_instance_name
   capacity = "CU_1"
-  
-  timeouts {
-    create = "30m"
-    update = "30m"
-    delete = "30m"
-  }
 }
 
 output "database_instance_name" {

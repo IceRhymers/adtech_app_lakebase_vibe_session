@@ -1,9 +1,10 @@
 import functools
 import os
 import uuid
-from typing import Any, Generator, Literal, Optional, Dict, List, Optional
+from typing import Any, Generator, Literal, Optional, Dict, List
 
 import mlflow
+import pydantic
 from mlflow.models import ModelConfig
 from databricks.sdk import WorkspaceClient
 from databricks_langchain import (
@@ -37,17 +38,36 @@ from langchain.tools import Tool
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnableLambda
+from mlflow.entities import SpanType, Document
 
 # Enable MLflow Tracing for LangChain
 mlflow.autolog()
 mlflow.langchain.autolog()
 
 # Load chain configuration provided at logging/deployment time.
-# The config should include at least:
-# - "llm_model_serving_endpoint_name": str
-# - "embedding_model": str
-# - "llm_prompt_template": str (expects {context} and {question})
 model_config: ModelConfig = mlflow.models.ModelConfig()
+
+# Pydantic models for input validation
+class Message(pydantic.BaseModel):
+    role: str
+    content: str
+    name: Optional[str] = None
+
+class Filters(pydantic.BaseModel):
+    user_name: str  # Required
+    chat_id: Optional[str] = None
+
+class CustomInputs(pydantic.BaseModel):
+    filters: Filters
+    k: Optional[int] = None  # Optional, will default to model_config value
+
+class ChatRequest(pydantic.BaseModel):
+    messages: List[Message]
+    custom_inputs: Optional[CustomInputs] = None
+
+class ChatResponse(pydantic.BaseModel):
+    messages: List[Message]
+    finish_reason: Optional[str] = None
 
 
 def _get_required_env(name: str) -> str:
@@ -140,6 +160,7 @@ embeddings = DatabricksEmbeddings(
 )
 
 # --- Vector similarity search over Postgres (pgvector) ---
+@mlflow.trace
 def pg_vector_similarity_search(
     query_text: str,
     k: int = 3,
@@ -165,10 +186,6 @@ def pg_vector_similarity_search(
         where_conditions.append("me.user_name = :user_name")
         params["user_name"] = filters["user_name"]
 
-    if "chat_id" in filters:
-        where_conditions.append("me.chat_id = :chat_id")
-        params["chat_id"] = filters["chat_id"]
-
     where_clause = ""
     if where_conditions:
         where_clause = "WHERE " + " AND ".join(where_conditions)
@@ -192,6 +209,9 @@ def pg_vector_similarity_search(
         """
     )
 
+    span = mlflow.get_current_active_span()
+    span.set_outputs([Document(page_content=sql)])
+
     with engine.connect() as conn:
         rows = conn.execute(
             sql, {"query_embedding": query_embedding, "k": k, **params}
@@ -201,26 +221,29 @@ def pg_vector_similarity_search(
     return "\n".join(passages)
 
 
-def create_context_aware_vector_search_tool(state):
-  """Create a vector search tool that has access to user context from state"""
+def create_context_aware_vector_search_tool(state, custom_k: Optional[int] = None):
+    """Create a vector search tool that has access to user context from state"""
 
-  def filtered_vector_search(query: str) -> str:
-      # Extract user context from state
-      user_context = state.get("user_context", {})
-      filters = user_context.get("filters", {})
+    def filtered_vector_search(query: str) -> str:
+        # Extract user context from state
+        user_context = state.get("user_context", {})
+        filters = user_context.get("filters", {})
 
-      # Use your existing pg_vector_similarity_search with filters
-      return pg_vector_similarity_search(
-          query_text=query, 
-          k=model_config.get('k'), 
-          filters=filters
-      )
+        # Use custom k if provided, otherwise fall back to model_config default
+        k = custom_k if custom_k is not None else model_config.get('k')
 
-  return Tool(
-      name="search_chat_history",
-      description="Retrieve chat history from Postgres (pgvector) for the current user; use only if the immediate conversation context is insufficient. THe input to this function should be the user message.",
-      func=filtered_vector_search,
-  )
+        # Use your existing pg_vector_similarity_search with filters and custom k
+        return pg_vector_similarity_search(
+            query_text=query, 
+            k=k, 
+            filters=filters
+        )
+
+    return Tool(
+        name="search_chat_history",
+        description="Retrieve chat history from Postgres (pgvector) for the current user; use only if the immediate conversation context is insufficient. The input to this function should be the user message.",
+        func=filtered_vector_search,
+    )
 
 
 genie_agent_description = model_config.get('genie_agent_description')
@@ -260,9 +283,6 @@ model = ChatDatabricks(
 
 # Custom Static Tools
 tools = []
-uc_tool_names = ["system.ai.*"]
-uc_toolkit = UCFunctionToolkit(function_names=uc_tool_names)
-tools.extend(uc_toolkit.tools)
 
 def supervisor_agent(state):
     count = state.get("iteration_count", 0) + 1
@@ -313,21 +333,20 @@ def final_answer(state):
     return {"messages": [final_answer_chain.invoke(state)]}
 
 
-def agent_node_with_context(state, agent, name):
+def agent_node_with_context(state, agent, name, custom_k: Optional[int] = None):
     """Enhanced agent node that injects context-aware tools"""
 
-    # Create the shared vector search tool with current state context
-    vector_search_tool = create_context_aware_vector_search_tool(state)
+    # Create the shared vector search tool with current state context and custom k
+    vector_search_tool = create_context_aware_vector_search_tool(state, custom_k)
 
     if name == "Genie":
         # Genie already has its tools, just add vector search
         enhanced_agent = agent  # Genie agent already configured
-        # Note: GenieAgent might need special handling - see option below
 
     elif name == "Coder" or name == "General":
-        # Add vector search tool to Coder's existing UC tools
-        enhanced_tools = tools + [vector_search_tool]  # tools is your UC toolkit
-        enhanced_agent = create_react_agent(model, tools=[vector_search_tool])
+        # Add vector search tool to other agents' tools
+        enhanced_tools = tools + [vector_search_tool]
+        enhanced_agent = create_react_agent(model, tools=enhanced_tools)
 
     # Execute with enhanced agent
     result = enhanced_agent.invoke(state)
@@ -339,21 +358,24 @@ def agent_node_with_context(state, agent, name):
         }]
     }
 
-# Create enhanced agent nodes
-def enhanced_genie_node(state):
-    enhanced_agent = genie_agent
-    return agent_node_with_context(state, enhanced_agent, "Genie")
-
-def enhanced_coder_node(state):
-    return agent_node_with_context(state, None, "Coder")
-
-def enhanced_general_node(state):
-    return agent_node_with_context(state, None, "General")
-
 class AgentState(ChatAgentState):
     next_node: str
     iteration_count: int
     user_context: Optional[Dict[str, Any]] = None
+    custom_k: Optional[int] = None
+
+# Create enhanced agent nodes
+def enhanced_genie_node(state):
+    custom_k = state.get("custom_k")
+    return agent_node_with_context(state, genie_agent, "Genie", custom_k)
+
+def enhanced_coder_node(state):
+    custom_k = state.get("custom_k")
+    return agent_node_with_context(state, None, "Coder", custom_k)
+
+def enhanced_general_node(state):
+    custom_k = state.get("custom_k")
+    return agent_node_with_context(state, None, "General", custom_k)
 
 workflow = StateGraph(AgentState)
 # Agent States
@@ -379,37 +401,43 @@ workflow.add_edge("final_answer", END)
 multi_agent = workflow.compile()
 
 ###################################
-# Wrap our multi-agent in ChatAgent
+# Streaming LangGraph ChatAgent
 ###################################
 
-
-class LangGraphChatAgent(ChatAgent):
+class PostgresGenieChatAgent(ChatAgent):
     def __init__(self, agent: CompiledStateGraph):
         self.agent = agent
 
     def predict(
-    self,
-    messages: list[ChatAgentMessage],
-    context: Optional[ChatContext] = None,
-    custom_inputs: Optional[dict[str, Any]] = None,
+        self,
+        messages: list[ChatAgentMessage],
+        context: Optional[ChatContext] = None,
+        custom_inputs: Optional[dict[str, Any]] = None,
     ) -> ChatAgentResponse:
-        # Extract user context from custom_inputs
+        """Non-streaming predict method for backward compatibility"""
+        # Extract user context and custom_k from custom_inputs
         user_context = {}
-        if custom_inputs and "filters" in custom_inputs:
-            user_context["filters"] = custom_inputs["filters"]
+        custom_k = None
 
-        request = {
+        if custom_inputs:
+            if "filters" in custom_inputs:
+                user_context["filters"] = custom_inputs["filters"]
+            custom_k = custom_inputs.get("k")
+
+        agent_request = {
             "messages": [m.model_dump_compat(exclude_none=True) for m in messages],
-            "user_context": user_context  # Inject user context into state
+            "user_context": user_context,
+            "custom_k": custom_k
         }
 
-        messages = []
-        for event in self.agent.stream(request, stream_mode="updates"):
+        response_messages = []
+        for event in self.agent.stream(agent_request, stream_mode="updates"):
             for node_data in event.values():
-                messages.extend(
+                response_messages.extend(
                     ChatAgentMessage(**msg) for msg in node_data.get("messages", [])
                 )
-        return ChatAgentResponse(messages=messages)
+
+        return ChatAgentResponse(messages=response_messages)
 
     def predict_stream(
         self,
@@ -417,10 +445,23 @@ class LangGraphChatAgent(ChatAgent):
         context: Optional[ChatContext] = None,
         custom_inputs: Optional[dict[str, Any]] = None,
     ) -> Generator[ChatAgentChunk, None, None]:
-        request = {
-            "messages": [m.model_dump_compat(exclude_none=True) for m in messages]
+        """Streaming predict method - yields incremental responses as they're generated"""
+        # Extract user context and custom_k from custom_inputs
+        user_context = {}
+        custom_k = None
+
+        if custom_inputs:
+            if "filters" in custom_inputs:
+                user_context["filters"] = custom_inputs["filters"]
+            custom_k = custom_inputs.get("k")
+
+        agent_request = {
+            "messages": [m.model_dump_compat(exclude_none=True) for m in messages],
+            "user_context": user_context,
+            "custom_k": custom_k
         }
-        for event in self.agent.stream(request, stream_mode="updates"):
+
+        for event in self.agent.stream(agent_request, stream_mode="updates"):
             for node_data in event.values():
                 yield from (
                     ChatAgentChunk(**{"delta": msg})
@@ -428,8 +469,49 @@ class LangGraphChatAgent(ChatAgent):
                 )
 
 
-# Create the agent object, and specify it as the agent object to use when
-# loading the agent back for inference via mlflow.models.set_model()
-AGENT = LangGraphChatAgent(multi_agent)
-chain = RunnableLambda(lambda x: AGENT.predict(x))
-mlflow.models.set_model(model=chain)
+###################################
+# Pydantic-based PythonModel (Legacy Support)
+###################################
+
+class ChatAgentPythonModel(mlflow.pyfunc.PythonModel):
+    def __init__(self):
+        self.agent = multi_agent
+
+    def predict(self, context, model_input: List[ChatRequest]) -> List[ChatResponse]:
+        """
+        Legacy predict method with pydantic type hints for automatic schema generation.
+        Note: MLflow expects List[InputType] -> List[OutputType] for pyfunc models.
+        """
+        responses = []
+
+        for request in model_input:
+            # Extract user context from request
+            user_context = {}
+            custom_k = None
+
+            if request.custom_inputs:
+                user_context["filters"] = request.custom_inputs.filters.model_dump()
+                custom_k = request.custom_inputs.k
+
+            # Convert pydantic messages to dict format for langgraph
+            messages_dict = [msg.model_dump(exclude_none=True) for msg in request.messages]
+
+            agent_request = {
+                "messages": messages_dict,
+                "user_context": user_context,
+                "custom_k": custom_k
+            }
+
+            response_messages = []
+            for event in self.agent.stream(agent_request, stream_mode="updates"):
+                for node_data in event.values():
+                    for msg in node_data.get("messages", []):
+                        response_messages.append(Message(**msg))
+
+            responses.append(ChatResponse(messages=response_messages))
+
+        return responses
+
+# Create the streaming model instance and set it for MLflow
+streaming_model_instance = PostgresGenieChatAgent(multi_agent)
+mlflow.models.set_model(model=streaming_model_instance)
