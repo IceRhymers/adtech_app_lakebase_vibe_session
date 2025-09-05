@@ -1,38 +1,6 @@
 # The main job for adtech_vector_chat.
 resources:
   jobs:
-    adtech_vector_chat_job:
-      name: adtech_vector_chat_job
-
-      schedule:
-        quartz_cron_expression: '0 0/30 * * * ?'  # Run every 30 minutes
-        timezone_id: UTC
-        pause_status: PAUSED
-
-      #email_notifications:
-      #  on_failure:
-      #    - your_email@example.com
-
-      tasks:
-        - task_key: postgres_catalog
-          notebook_task:
-            notebook_path: ../data_pipelines/src/00-postgres-catalog.ipynb
-            base_parameters:
-              db_instance_name: tannerw-adtech-db
-              db_database_name: databricks_postgres
-              catalog_name: tanner_wendland_postgres_adtech
-
-        - task_key: chat_history_sync
-          notebook_task:
-            notebook_path: ../data_pipelines/src/01-sync-chat-history.ipynb
-            base_parameters:
-              source_table_catalog: tanner_wendland_postgres_adtech
-              source_table_database: public
-              vector_search_endpoint: one-env-shared-endpoint-7
-              sink_catalog: tanner_wendland
-              sink_schema: default
-          depends_on:
-            - task_key: postgres_catalog
 
     adtech_chat_history_agent_job:
       name: adtech_chat_history_agent_job
@@ -40,9 +8,9 @@ resources:
       tasks:
         - task_key: adtech_chat_history_agent
           notebook_task:
-            notebook_path: ../data_pipelines/src/02.2-chat-history-agent-pg-genie.ipynb
+            notebook_path: ../data_pipelines/src/chat-history-agent-pg-genie.ipynb
             base_parameters:
-              target_catalog: tanner_wendland_workspace
+              target_catalog: tanner_wendland
               target_schema: default
               llm_model_serving_endpoint_name: databricks-claude-3-7-sonnet
               embedding_model: databricks-gte-large-en
@@ -50,4 +18,4 @@ resources:
               postgres_database_name: databricks_postgres
               secret_scope: adtech_demo
               secret_key: app-secret
-              genie_space_id: 01efcca6fdc712d7be87a40ad4a2e33e
+              genie_space_id: 01f07c4ba44615aab8989b10e0a95420
